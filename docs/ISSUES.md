@@ -83,6 +83,7 @@
 | ISS-018 | **Blank Screen After Swiping All Cards** | 17 Dec 2025 | In-deck empty state card + keep saved assets panel available + “Generate more” CTA |
 | ISS-019 | **Off-Brand Images (Random Landscapes)** | 17 Dec 2025 | Replaced Picsum fallback with branded placeholder + added Imagen model fallback list |
 | ISS-020 | **Offerings/Strategy Empty** | 17 Dec 2025 | Normalised brand profile output; ensure offerings/strategy always populated (fallback heuristics) |
+| ISS-021 | **Analysis Tool Error** | 17 Dec 2025 | Split research and JSON extraction into two API calls to support Gemini 2.5 Flash constraints |
 
 ---
 
@@ -102,5 +103,5 @@
 
 ---
 
-*Last Updated: 17 December 2025 - ISS-020 Resolved (Deck Empty State + Imagen Fallback + Profile Normalisation)*
+*Last Updated: 17 December 2025 - ISS-021 Resolved (Analysis Tool Error)*
 

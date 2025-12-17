@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { BrandProfile, SocialPost } from "../types";
 
 /**
@@ -166,6 +166,55 @@ const getVideoBackupClient = (): GoogleGenAI => {
 };
 
 /**
+ * Helper: Perform research using Google Search tool (Step 1), then extract JSON (Step 2).
+ * This splits the process to avoid "Tool use with response mime type application/json is unsupported" error.
+ */
+const researchAndExtract = async <T>(
+  prompt: string,
+  schema: Schema,
+  modelId: string = "gemini-2.5-flash"
+): Promise<T> => {
+  // Step 1: Research (Tool use, returns text)
+  console.log("🔍 Step 1: Researching...");
+  const researchResponse = await getTextClient().models.generateContent({
+    model: modelId,
+    contents: prompt,
+    config: {
+      tools: [{ googleSearch: {} }],
+      responseMimeType: "text/plain", // Explicitly request text for tool use
+    },
+  });
+
+  const researchText = researchResponse.text;
+  if (!researchText) throw new Error("No research data returned from AI");
+
+  // Step 2: Extract JSON (No tools, returns JSON)
+  console.log("📊 Step 2: Extracting JSON...");
+  const extractPrompt = `
+    Based on the following research data, extract the required information in JSON format.
+    
+    RESEARCH DATA:
+    ${researchText}
+    
+    CRITICAL: Return ONLY valid JSON matching the schema.
+  `;
+
+  const extractResponse = await getTextClient().models.generateContent({
+    model: modelId,
+    contents: extractPrompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: schema,
+    },
+  });
+
+  const jsonText = extractResponse.text;
+  if (!jsonText) throw new Error("No JSON returned from extraction step");
+
+  return JSON.parse(jsonText) as T;
+};
+
+/**
  * Validates that a URL is accessible by using Gemini's search capability.
  * Returns true if the URL is reachable, throws an error otherwise.
  */
@@ -215,8 +264,6 @@ const enrichBrandProfile = async (
   url: string, 
   issues: string[]
 ): Promise<BrandProfile> => {
-  const modelId = "gemini-2.5-flash";
-  
   console.log("🔄 Enriching incomplete profile...", issues);
   
   // Build targeted enrichment query
@@ -268,10 +315,10 @@ const enrichBrandProfile = async (
     Services: ${baseProfile.services?.join(', ') || 'EMPTY - NEEDS 10+ SPECIFIC ITEMS'}
     Strategy: ${baseProfile.strategy || 'EMPTY - NEEDS 100+ CHAR PARAGRAPH'}
     
-    Return ONLY the enriched brand profile as JSON with complete data.
+    Goal: Return a complete brand profile with the missing data filled in.
   `;
   
-  const enrichedSchema = {
+  const enrichedSchema: Schema = {
     type: Type.OBJECT,
     properties: {
       name: { type: Type.STRING },
@@ -291,17 +338,7 @@ const enrichBrandProfile = async (
   };
   
   try {
-    const response = await getTextClient().models.generateContent({
-      model: modelId,
-      contents: enrichmentPrompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        responseSchema: enrichedSchema,
-      },
-    });
-    
-    const enriched = JSON.parse(response.text || "{}") as BrandProfile;
+    const enriched = await researchAndExtract<BrandProfile>(enrichmentPrompt, enrichedSchema);
     
     console.log("✅ Enrichment complete:", {
       servicesCount: enriched.services?.length || 0,
@@ -329,12 +366,10 @@ const enrichBrandProfile = async (
  * Uses combined research + extraction approach with quality gates.
  */
 export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
-  const modelId = "gemini-2.5-flash";
-  
   console.log("🔍 Analyzing brand with enhanced validation...");
   
   // Enhanced schema with strict requirements
-  const enhancedSchema = {
+  const enhancedSchema: Schema = {
     type: Type.OBJECT,
     properties: {
       name: { type: Type.STRING },
@@ -343,7 +378,7 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
       services: { 
         type: Type.ARRAY, 
         items: { type: Type.STRING },
-        minItems: 10,
+        // minItems: 10, // Not supported in all Schema versions, handled in prompt
         description: "Array of 10-20 SPECIFIC product/service names (NOT generic categories)"
       },
       socialHandles: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Social media URLs/handles" },
@@ -353,7 +388,7 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
       competitors: { type: Type.ARRAY, items: { type: Type.STRING }, description: "3-5 real competitors" },
       strategy: { 
         type: Type.STRING,
-        minLength: 100,
+        // minLength: 100, // Not supported in all Schema versions
         description: "Detailed 3-5 sentence marketing strategy (minimum 100 characters)"
       },
       essence: { type: Type.STRING, description: "One sentence summary of what this business does" },
@@ -419,20 +454,9 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
   `;
 
   try {
-    const response = await getTextClient().models.generateContent({
-      model: modelId,
-      contents: combinedPrompt,
-      config: {
-        tools: [{ googleSearch: {} }], // Research capability
-        responseMimeType: "application/json",
-        responseSchema: enhancedSchema,
-      },
-    });
-
-    const text = response.text;
-    if (!text) throw new Error("No analysis returned from AI");
+    const profileData = await researchAndExtract<BrandProfile>(combinedPrompt, enhancedSchema);
     
-    const profile = normaliseBrandProfile(JSON.parse(text) as BrandProfile);
+    const profile = normaliseBrandProfile(profileData);
     
     console.log("📊 Initial profile quality:", {
       name: profile.name,
@@ -520,8 +544,6 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
  * Analyzes an additional URL and merges it into the existing profile.
  */
 export const mergeSourceUrl = async (currentProfile: BrandProfile, newUrl: string): Promise<BrandProfile> => {
-    const modelId = "gemini-2.5-flash";
-    
     const prompt = `
       I have an existing brand profile for "${currentProfile.name}".
       Current Services: ${currentProfile.services.join(', ')}
@@ -539,37 +561,28 @@ export const mergeSourceUrl = async (currentProfile: BrandProfile, newUrl: strin
       Return the updated BrandProfile JSON.
     `;
   
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING },
+        industry: { type: Type.STRING },
+        products: { type: Type.STRING },
+        services: { type: Type.ARRAY, items: { type: Type.STRING } },
+        socialHandles: { type: Type.ARRAY, items: { type: Type.STRING } },
+        colors: { type: Type.ARRAY, items: { type: Type.STRING } },
+        vibe: { type: Type.STRING },
+        visualStyle: { type: Type.STRING },
+        competitors: { type: Type.ARRAY, items: { type: Type.STRING } },
+        strategy: { type: Type.STRING },
+        essence: { type: Type.STRING },
+        confidence: { type: Type.NUMBER },
+      },
+      required: ["name", "industry", "products", "services", "colors", "vibe", "visualStyle", "competitors", "strategy"]
+    };
+
     try {
-      const response = await getTextClient().models.generateContent({
-        model: modelId,
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-             type: Type.OBJECT,
-             properties: {
-                name: { type: Type.STRING },
-                industry: { type: Type.STRING },
-                products: { type: Type.STRING },
-                services: { type: Type.ARRAY, items: { type: Type.STRING } },
-                socialHandles: { type: Type.ARRAY, items: { type: Type.STRING } },
-                colors: { type: Type.ARRAY, items: { type: Type.STRING } },
-                vibe: { type: Type.STRING },
-                visualStyle: { type: Type.STRING },
-                competitors: { type: Type.ARRAY, items: { type: Type.STRING } },
-                strategy: { type: Type.STRING },
-                essence: { type: Type.STRING },
-                confidence: { type: Type.NUMBER },
-             },
-             required: ["name", "industry", "products", "services", "colors", "vibe", "visualStyle", "competitors", "strategy"]
-          },
-        },
-      });
-  
-      const text = response.text;
-      if (!text) return currentProfile;
-      return JSON.parse(text) as BrandProfile;
+      const enriched = await researchAndExtract<BrandProfile>(prompt, schema);
+      return enriched;
     } catch (e) {
       console.error("Merge failed", e);
       return currentProfile;
@@ -803,7 +816,6 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
     const client = getImageClient();
     const modelCandidates = [
       // Try multiple model IDs to survive upstream naming/version changes
-      "imagen-3.0-generate-002",
       "imagen-3.0-generate-001",
       "imagen-3.0-fast-generate-001",
       "imagen-2.0-generate-001",
@@ -814,21 +826,21 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
       try {
         const response = await client.models.generateImages({
           model,
-      prompt: finalPrompt,
-      config: {
-        numberOfImages: 1,
-        aspectRatio: aspectRatio === "9:16" ? "9:16" : aspectRatio === "16:9" ? "16:9" : "1:1",
-      },
-    });
+          prompt: finalPrompt,
+          config: {
+            numberOfImages: 1,
+            aspectRatio: aspectRatio === "9:16" ? "9:16" : aspectRatio === "16:9" ? "16:9" : "1:1",
+          },
+        });
 
-    if (response.generatedImages && response.generatedImages.length > 0) {
-      const imageData = response.generatedImages[0].image?.imageBytes;
-      if (imageData) {
+        if (response.generatedImages && response.generatedImages.length > 0) {
+          const imageData = response.generatedImages[0].image?.imageBytes;
+          if (imageData) {
             console.log(`✅ Imagen model succeeded: ${model}`);
-        return `data:image/png;base64,${imageData}`;
-      }
-    }
-    
+            return `data:image/png;base64,${imageData}`;
+          }
+        }
+
         console.warn(`⚠️ Imagen model returned no images: ${model}`);
       } catch (err: any) {
         lastError = err;
