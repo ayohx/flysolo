@@ -58,7 +58,7 @@
 - [x] Quick time selection buttons
 - [x] Video playback CORS fix (blob URL)
 
-### Phase 6: Netlify Deployment (17 December 2025)
+### Phase 6: Netlify Deployment & Fixes (17 December 2025)
 - [x] Initial GitHub push to https://github.com/ayohx/flysolo.git
 - [x] Netlify configuration (`netlify.toml`)
 - [x] Serverless function for VEO image-to-video (`netlify/functions/generate-video.ts`)
@@ -67,6 +67,8 @@
 - [x] Environment variable configuration via Netlify CLI
 - [x] Production deployment to https://flysolo-ai.netlify.app/
 - [x] API key typo fix (O vs 0 character confusion)
+- [x] **CRITICAL FIX**: Split analysis into two steps (Research vs Extraction) to solve Gemini 2.5 tool error
+- [x] **CRITICAL FIX**: Imagen model fallback chain + branded placeholder for reliable image generation
 
 ### Phase 7: Polish & Production (Planned)
 - [ ] Remove debug logging from production
@@ -520,6 +522,29 @@ const result = await generatePostVideo(videoPrompt, brandProfile, '5s', editingP
 
 ---
 
+### Issue #021: Analysis Tool Error (Gemini 2.5 Flash)
+**Date**: 17 December 2025
+**Severity**: Critical
+**Symptom**: `{"error":{"code":400,"message":"Tool use with a response mime type: 'application/json' is unsupported","status":"INVALID_ARGUMENT"}}` when clicking "Start".
+
+**Root Cause**: The new Gemini 2.5 Flash model does not support using `googleSearch` tools AND `responseMimeType: "application/json"` in the same request.
+
+**Solution**: Refactored `services/geminiService.ts` to use a two-step process:
+1. **Research Step**: Call API with `tools: [{ googleSearch: {} }]` and standard text response.
+2. **Extraction Step**: Call API with the research text and `responseSchema` to get valid JSON.
+
+```typescript
+// researchAndExtract helper
+const researchResponse = await getTextClient().models.generateContent({
+  // ... tools: [{ googleSearch: {} }]
+});
+const extractResponse = await getTextClient().models.generateContent({
+  // ... contents: researchText, responseSchema: schema
+});
+```
+
+---
+
 ## ⚙️ Configuration Reference
 
 ### Environment Variables
@@ -588,6 +613,31 @@ define: {
 ---
 
 ## 📅 Session Logs (BMAD)
+
+### Session: 17 December 2025 (Late Night) — Critical Analysis Fix & Fallback
+**Duration**: ~1 hour
+**Focus**: Diagnosing production errors and implementing robust fallbacks
+
+#### ✅ Work Completed
+| Time | Task | Status |
+|------|------|--------|
+| 00:30 | Diagnosed `INVALID_ARGUMENT` tool error on production | ✅ |
+| 00:45 | Refactored `geminiService.ts` to split research and extraction | ✅ |
+| 01:00 | Diagnosed Imagen model ID failures | ✅ |
+| 01:15 | Confirmed `brandedPlaceholder` fallback logic | ✅ |
+| 01:30 | Deployed fixes to Netlify | ✅ |
+
+#### 🐛 Issues Encountered
+- **Gemini 2.5 Flash Limitation**: Cannot combine Tools + JSON Mode.
+- **Solution**: Two-step pipeline (Research -> Extract).
+- **Imagen Model Churn**: Specific model IDs (`generate-002`) returning 404.
+- **Solution**: Fallback list + Branded Placeholders.
+
+#### 💡 Decisions Made
+- **Reliability over Speed**: Two API calls for analysis is slower but guarantees valid JSON.
+- **Graceful Degradation**: If image AI fails, show a branded abstract SVG instead of a broken image or random Picsum photo.
+
+---
 
 ### Session: 17 December 2025 (Night) — Full Calendar Scheduling System
 **Duration**: ~2 hours  
@@ -690,6 +740,11 @@ define: {
 
 ## 📝 Changelog
 
+### v0.7.2 (17 December 2025) - Stability Patch
+- 🐛 **Analysis Tool Fix**: Solved `INVALID_ARGUMENT` error by splitting research (tools) and extraction (JSON) into separate API calls.
+- ✨ **Robust Image Fallback**: Added multi-model retry chain for Imagen and a **branded placeholder** fallback (SVG with brand colors) to prevent blank/random images.
+- 📝 **Updated Docs**: Comprehensive BMAD logs for debugging sessions.
+
 ### v0.7.1 (17 December 2025) - VEO Safe Motion Prompts
 - 🐛 **VEO RAI Filter Fix**: Added array of safe motion prompts to bypass content filters
 - ✨ **REST API for Image-to-Video**: Use direct REST API instead of SDK (SDK doesn't support i2v)
@@ -788,192 +843,4 @@ define: {
 
 ---
 
-*Last Updated: 17 December 2025 - v0.5.0 Full Calendar Scheduling*
-
-
-
----
-
-## 2025-12-17: Critical Bug Fixes - Blank Screen, Image Quality, Brand Profile
-
-### Status: ✅ COMPLETED
-
-### **B** - Business Requirements
-User reported three critical production bugs:
-1. **Blank Screen Bug**: Users see blank screen when swiping through all cards faster than generation
-2. **Off-Brand Images**: Nike analysis generating cacti/desert images instead of athletic footwear
-3. **Empty Brand Data**: "Identified Offerings" and "Strategy" sections showing empty despite data being present
-
-### **M** - Milestones
-- [x] Phase 1: Root cause analysis for all 3 bugs
-- [x] Phase 2: Implement comprehensive fixes
-- [x] Phase 3: Update documentation
-- [x] Phase 4: Git commit and push
-
-### **A** - Architecture Decisions & Root Causes
-
-#### Bug 1: Blank Screen - Root Cause Analysis
-**Symptom**: Rapid swiping causes blank screen instead of loading state
-
-**Root Cause**: When the deck is exhausted, the component used an early-return “end of deck” UI that replaced the entire swipe layout. Users could no longer access saved assets whilst waiting, and depending on timing this could look like a blank/empty screen.
-
-**Solution Implemented**:
-1. Keep the **full swipe layout** mounted at all times (brand profile + saved assets panel).
-2. Render an **in-deck empty state card** when `currentIndex >= posts.length`:
-   - “Designing new assets…” when generating
-   - “No more assets to review” otherwise
-3. Provide clear CTAs:
-   - **View saved assets** (opens saved panel)
-   - **Generate more** (triggers `onFetchMore()`)
-4. Retain swipe guards so users can’t swipe into an invalid state whilst generation is running.
-
-**Files Modified**:
-- `components/SwipeDeck.tsx`
-
-#### Bug 2: Nike Cacti Problem - Root Cause Analysis
-**Symptom**: Nike brand generating desert/cacti images instead of shoes/athletic gear
-
-**Root Cause**: Image generation failures were silently falling back to random `picsum.photos` placeholders (often landscapes/deserts), making outputs look off-brand and “low quality”.
-
-**The Issue**:
-- Single hard-coded Imagen model ID can fail depending on availability/quota.
-- Placeholder fallback content was random and unrelated to the brand.
-- Prompts could reference undefined offerings when profile data was sparse, weakening results.
-
-**Solution Implemented**:
-1. Added an Imagen **model fallback list** (tries multiple known model IDs).
-2. Replaced Picsum fallback with a **branded placeholder** (brand colour gradient shapes; no random landscapes).
-3. Ensured content generation uses a **safe profile** (non-empty offerings/strategy/colours), avoiding undefined references.
-4. Kept the strict `visualPrompt` structure and validation rules for on-brand composition.
-
-**Files Modified**:
-- `services/geminiService.ts`
-
-#### Bug 3: Empty Offerings/Strategy - Root Cause Analysis
-**Symptom**: Brand profile shows empty "Identified Offerings" and "Strategy" sections
-
-**Root Cause**: Brand analysis can occasionally return sparse `services` or a short `strategy`. Even if the UI is expanded, empty values give the AI too little product context and lead to weak/off-brand generation.
-
-**Solution Implemented**:
-1. Added brand profile **normalisation** to guarantee:
-   - `services` is non-empty (fallback heuristics for common industries like athletic footwear/apparel)
-   - `strategy` meets a minimum substance threshold (fallback strategy paragraph)
-   - `colors` always has at least 2-3 usable values
-2. Updated content generation prompts to use the normalised “safe” profile fields.
-3. Kept UI defaults expanded (still valuable for visibility).
-
-**Files Modified**:
-- `services/geminiService.ts`
-- `components/BrandInfoCard.tsx` (previously: expanded sections by default)
-
-### **D** - Documentation
-
-#### Changes Summary
-
-**components/SwipeDeck.tsx**:
-```typescript
-// Added canSwipe guard
-const canSwipe = !(isLowOnCards && isGeneratingMore);
-
-// Block swipes when guard is false
-const handleSwipe = (dir) => {
-  if (!canSwipe) {
-    console.log("❌ Swipe blocked - generating more cards");
-    return;
-  }
-  // ... rest of logic
-};
-
-// Disable buttons visually
-<button 
-  disabled={!canSwipe}
-  className={canSwipe ? 'active-styles' : 'disabled-styles'}
->
-```
-
-**services/geminiService.ts - generateContentIdeas()**:
-```typescript
-// MANDATORY 6-STEP STRUCTURE for visualPrompt
-1. COMPOSITION TYPE: "Close-up product shot"
-2. SPECIFIC SUBJECT: "Nike Air Max 270 sneakers" (from offerings)
-3. VISUAL ELEMENTS: Incorporate visualStyle
-4. BRAND COLORS: Mention #000000, #FF6B00 in scene
-5. LIGHTING & MOOD: "dramatic studio lighting"
-6. STYLE KEYWORDS: "professional product photography"
-
-// Example with verification checklist
-visualPrompt: "Close-up of [product] on [color] platform with [color] 
-accent lighting. [style] composition. Professional [industry] photography."
-```
-
-**components/BrandInfoCard.tsx**:
-```typescript
-// Changed from false to true
-const [expandedSections] = useState({
-  offerings: true,  // ✅ Now visible by default
-  strategy: true,   // ✅ Now visible by default
-});
-```
-
-**services/geminiService.ts - analyzeBrand()**:
-```typescript
-// Enhanced prompts with specific examples
-services: Array of 10-20 SPECIFIC products
-  - Nike: ["Air Max 270", "Air Jordan 1", "Dri-FIT Running Shirts"]
-  - NOT: ["Shoes", "Apparel", "Accessories"]
-
-strategy: DETAILED paragraph (3-5 sentences):
-  - Target audience
-  - Key differentiators  
-  - Content themes
-  - Social media approach
-```
-
-#### Testing Checklist
-
-**Test 1: Blank Screen Bug**
-- [ ] Analyze any brand (Nike or Holiday Extras)
-- [ ] Rapidly swipe through 15+ cards
-- [ ] Expected: See "Generating more cards... (X left)" message
-- [ ] Expected: Buttons disabled with reduced opacity
-- [ ] Expected: NO blank screen ever
-- [ ] Expected: Smooth transition to new cards when ready
-
-**Test 2: Nike Image Quality**
-- [ ] Analyze nike.com
-- [ ] Generate 10 posts
-- [ ] Check images show:
-  - [ ] Actual Nike products (shoes, apparel)
-  - [ ] Black/white/orange color scheme
-  - [ ] Athletic/sports context
-  - [ ] Professional product photography style
-  - [ ] NO cacti, deserts, or random landscapes
-
-**Test 3: Brand Profile Visibility**
-- [ ] Analyze nike.com
-- [ ] Check Brand Profile card (left sidebar)
-- [ ] "Identified Offerings" section:
-  - [ ] Should be EXPANDED by default
-  - [ ] Should show 10-20 specific Nike products
-  - [ ] Examples: "Air Max 270", "Jordan 1 High", etc.
-- [ ] "Strategy" section:
-  - [ ] Should be EXPANDED by default
-  - [ ] Should show 3-5 sentence paragraph
-  - [ ] Should mention target audience and approach
-
-#### Performance Impact
-- Swipe blocking adds ~0ms overhead (instant guard check)
-- Enhanced prompts add ~2-3 seconds to content generation (acceptable)
-- No impact on existing state management or rendering
-
-#### Rollback Plan
-If issues arise:
-```bash
-git revert HEAD
-git push origin main
-```
-
-Previous commit: 901feb7 (testing documentation)
-This commit: [to be added after push]
-
----
+*Last Updated: 17 December 2025 - v0.7.2 Stability Patch*
