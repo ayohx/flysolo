@@ -6,7 +6,7 @@ import SwipeDeck from './components/SwipeDeck';
 import Editor from './components/Editor';
 import Dashboard from './components/Dashboard';
 import CalendarPage from './components/CalendarPage';
-import { analyzeBrand, generateContentIdeas, generatePostImage, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus } from './services/geminiService';
+import { analyzeBrand, generateContentIdeas, generatePostImage, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys } from './services/geminiService';
 import { Plus, X } from 'lucide-react';
 
 // LocalStorage keys
@@ -35,6 +35,9 @@ function App() {
   const [likedPosts, setLikedPosts] = useState<SocialPost[]>([]);
   const [loadingImages, setLoadingImages] = useState<Set<string>>(new Set());
   const [isHydrated, setIsHydrated] = useState(false);
+  
+  // Check if API is configured
+  const apiConfigured = isApiConfigured();
   
   // Error handling state
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -489,6 +492,42 @@ function App() {
   const handleDeckEmpty = () => {
     setAppState(AppState.DASHBOARD);
   };
+
+  // Show configuration error if API keys are missing
+  if (!apiConfigured) {
+    const missingKeys = getMissingApiKeys();
+    return (
+      <div className="h-screen w-full bg-gray-950 flex items-center justify-center p-8">
+        <div className="max-w-lg text-center">
+          <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-red-500/20 flex items-center justify-center">
+            <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-4">API Keys Not Configured</h1>
+          <p className="text-gray-400 mb-6">
+            FlySolo requires Google AI API keys to function. Please configure the following environment variables in your Netlify dashboard:
+          </p>
+          <div className="bg-gray-900 rounded-lg p-4 text-left mb-6">
+            <ul className="space-y-2 text-sm font-mono">
+              {missingKeys.map(key => (
+                <li key={key} className="text-red-400">
+                  ❌ {key}
+                </li>
+              ))}
+              <li className="text-gray-500">VITE_IMAGEN_API_KEY (optional)</li>
+              <li className="text-gray-500">VITE_VEO_API_KEY (optional)</li>
+            </ul>
+          </div>
+          <div className="text-sm text-gray-500 space-y-2">
+            <p>1. Go to <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">Google AI Studio</a> to get an API key</p>
+            <p>2. Add it to Netlify: Site settings → Environment variables</p>
+            <p>3. Redeploy your site</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Render Logic
   switch (appState) {

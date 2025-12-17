@@ -2,16 +2,68 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { BrandProfile, SocialPost } from "../types";
 
 /**
+ * Check if API keys are configured
+ */
+const API_KEY = process.env.API_KEY || '';
+const IMAGEN_API_KEY = process.env.IMAGEN_API_KEY || API_KEY;
+const VEO_API_KEY = process.env.VEO_API_KEY || API_KEY;
+const VEO_API_KEY_2 = process.env.VEO_API_KEY_2 || VEO_API_KEY;
+
+export const isApiConfigured = (): boolean => {
+  return !!API_KEY;
+};
+
+export const getMissingApiKeys = (): string[] => {
+  const missing: string[] = [];
+  if (!API_KEY) missing.push('VITE_GEMINI_API_KEY');
+  return missing;
+};
+
+/**
  * Multiple API clients for different services:
  * - aiText: For Gemini text generation, analysis, content creation
  * - aiImage: For Imagen image generation (uses different quota/billing)
  * - aiVideo: For VEO 3 video generation (primary key)
  * - aiVideoBackup: For VEO 3 video generation (backup key for failover)
+ * 
+ * Note: Clients are created lazily to prevent crashes when keys are missing
  */
-const aiText = new GoogleGenAI({ apiKey: process.env.API_KEY });
-const aiImage = new GoogleGenAI({ apiKey: process.env.IMAGEN_API_KEY || process.env.API_KEY });
-const aiVideo = new GoogleGenAI({ apiKey: process.env.VEO_API_KEY || process.env.API_KEY });
-const aiVideoBackup = new GoogleGenAI({ apiKey: process.env.VEO_API_KEY_2 || process.env.VEO_API_KEY || process.env.API_KEY });
+let aiText: GoogleGenAI | null = null;
+let aiImage: GoogleGenAI | null = null;
+let aiVideo: GoogleGenAI | null = null;
+let aiVideoBackup: GoogleGenAI | null = null;
+
+const getTextClient = (): GoogleGenAI => {
+  if (!aiText) {
+    if (!API_KEY) throw new Error('VITE_GEMINI_API_KEY environment variable is not set');
+    aiText = new GoogleGenAI({ apiKey: API_KEY });
+  }
+  return aiText;
+};
+
+const getImageClient = (): GoogleGenAI => {
+  if (!aiImage) {
+    if (!IMAGEN_API_KEY) throw new Error('VITE_IMAGEN_API_KEY environment variable is not set');
+    aiImage = new GoogleGenAI({ apiKey: IMAGEN_API_KEY });
+  }
+  return aiImage;
+};
+
+const getVideoClient = (): GoogleGenAI => {
+  if (!aiVideo) {
+    if (!VEO_API_KEY) throw new Error('VITE_VEO_API_KEY environment variable is not set');
+    aiVideo = new GoogleGenAI({ apiKey: VEO_API_KEY });
+  }
+  return aiVideo;
+};
+
+const getVideoBackupClient = (): GoogleGenAI => {
+  if (!aiVideoBackup) {
+    if (!VEO_API_KEY_2) throw new Error('VEO API backup key is not set');
+    aiVideoBackup = new GoogleGenAI({ apiKey: VEO_API_KEY_2 });
+  }
+  return aiVideoBackup;
+};
 
 /**
  * Validates that a URL is accessible by using Gemini's search capability.
@@ -22,7 +74,7 @@ export const validateUrlAccessibility = async (url: string): Promise<{ valid: bo
   
   try {
     // Use Google Search grounding to verify the website exists
-    const response = await aiText.models.generateContent({
+    const response = await getTextClient().models.generateContent({
       model: modelId,
       contents: `Search for information about this website: ${url}
                  
@@ -195,7 +247,7 @@ export const mergeSourceUrl = async (currentProfile: BrandProfile, newUrl: strin
     `;
   
     try {
-      const response = await aiText.models.generateContent({
+      const response = await getTextClient().models.generateContent({
         model: modelId,
         contents: prompt,
         config: {
@@ -273,7 +325,7 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
   `;
 
   try {
-    const response = await aiText.models.generateContent({
+    const response = await getTextClient().models.generateContent({
       model: modelId,
       contents: prompt,
       config: {
@@ -328,7 +380,7 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
 
   try {
     // Try Imagen 3 model for image generation (uses separate API key)
-    const response = await aiImage.models.generateImages({
+    const response = await getImageClient().models.generateImages({
       model: "imagen-3.0-generate-001",
       prompt: finalPrompt,
       config: {
@@ -378,7 +430,7 @@ export const refinePost = async (currentPost: SocialPost, instruction: string): 
   `;
 
   try {
-    const response = await aiText.models.generateContent({
+    const response = await getTextClient().models.generateContent({
       model: modelId,
       contents: prompt,
       config: {
@@ -427,7 +479,7 @@ export const autoSchedulePosts = async (posts: SocialPost[], strategy: string): 
   `;
 
   try {
-    const response = await aiText.models.generateContent({
+    const response = await getTextClient().models.generateContent({
       model: modelId,
       contents: prompt,
       config: {
@@ -580,7 +632,8 @@ export const generatePostVideo = async (
   };
 
   // Helper function to attempt video generation with a specific client
-  const tryGenerateVideo = async (client: typeof aiVideo, useImageToVideo: boolean = true) => {
+  const tryGenerateVideo = async (clientGetter: () => GoogleGenAI, useImageToVideo: boolean = true) => {
+    const client = clientGetter();
     const apiKey = process.env.VEO_API_KEY || process.env.API_KEY;
     
     // If we have a source image AND image-to-video is enabled, use IMAGE-TO-VIDEO mode
@@ -722,19 +775,19 @@ export const generatePostVideo = async (
       } catch (netlifyError: any) {
         console.warn("⚠️ Netlify function failed:", netlifyError.message);
         // Fall back to SDK
-        result = await tryGenerateVideo(aiVideo, true);
+        result = await tryGenerateVideo(getVideoClient, true);
       }
     } else {
       // Development or no source image - use SDK directly
       try {
-        result = await tryGenerateVideo(aiVideo, true);
+        result = await tryGenerateVideo(getVideoClient, true);
       } catch (primaryError: any) {
         console.warn("⚠️ Primary VEO key failed:", primaryError.message);
         
         // Try backup key
         try {
           console.log("🔄 Trying backup VEO key...");
-          result = await tryGenerateVideo(aiVideoBackup, true);
+          result = await tryGenerateVideo(getVideoBackupClient, true);
         } catch (backupError: any) {
           console.error("❌ Backup key also failed:", backupError.message);
           
