@@ -79,6 +79,7 @@
 | ISS-014 | **Video Using Wrong Prompt** | 17 Dec 2025 | Quick Animate uses user's instruction |
 | ISS-015 | **Netlify API Key Invalid** | 17 Dec 2025 | Fixed O vs 0 typo via Netlify CLI |
 | ISS-016 | **Blank Screen on Production** | 17 Dec 2025 | Lazy client init + error screen |
+| ISS-017 | **VEO RAI Filter Rejections** | 17 Dec 2025 | Safe motion prompts + REST API fallback |
 
 ---
 
@@ -98,5 +99,5 @@
 
 ---
 
-*Last Updated: 17 December 2025 - ISS-015, ISS-016 Resolved (Netlify Production Deployment Live!)*
+*Last Updated: 17 December 2025 - ISS-017 Resolved (VEO Safe Motion Prompts Fix)*
 

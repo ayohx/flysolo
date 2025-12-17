@@ -690,6 +690,13 @@ define: {
 
 ## 📝 Changelog
 
+### v0.7.1 (17 December 2025) - VEO Safe Motion Prompts
+- 🐛 **VEO RAI Filter Fix**: Added array of safe motion prompts to bypass content filters
+- ✨ **REST API for Image-to-Video**: Use direct REST API instead of SDK (SDK doesn't support i2v)
+- ✨ **Fallback Chain**: REST API → SDK text-to-video with safe prompts
+- ✨ **mimeType in Netlify Function**: Fixed missing mimeType in serverless function
+- 🧪 **Tested Locally**: Video generation + playback confirmed working
+
 ### v0.7.0 (17 December 2025) - Production Live! 🚀
 - 🚀 **LIVE**: https://flysolo-ai.netlify.app/ is now fully operational
 - 🐛 **API Key Typo Fix**: Fixed `0` (zero) vs `O` (letter) confusion in Netlify env var
