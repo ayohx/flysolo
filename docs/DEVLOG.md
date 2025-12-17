@@ -642,6 +642,14 @@ define: {
 
 ## 📝 Changelog
 
+### v0.6.0 (17 December 2025) - Netlify Deployment Ready
+- 🚀 **GitHub Push**: Initial commit to https://github.com/ayohx/flysolo.git
+- ✨ **Netlify Config**: `netlify.toml` with build settings and SPA routing
+- ✨ **Serverless Function**: `netlify/functions/generate-video.ts` for CORS-free VEO API
+- ✨ **Production Detection**: Auto-detects Netlify and uses serverless function
+- 📝 Added `.env.example` with deployment notes
+- 📝 Updated documentation for Netlify deployment
+
 ### v0.5.3 (17 December 2025) - Video Motion Prompt Complete Fix
 - 🐛 **CRITICAL FIX**: Video prompts now use user's actual motion instructions
 - 🐛 **Fixed**: Quick Animate button was ignoring user's typed instruction
