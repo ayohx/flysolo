@@ -77,6 +77,8 @@
 | ISS-012 | Video CORS Playback Failure | 17 Dec 2025 | Blob URL fetch |
 | ISS-013 | **Video Not Matching Source Image** | 17 Dec 2025 | Image-to-Video mode + fallback |
 | ISS-014 | **Video Using Wrong Prompt** | 17 Dec 2025 | Quick Animate uses user's instruction |
+| ISS-015 | **Netlify API Key Invalid** | 17 Dec 2025 | Fixed O vs 0 typo via Netlify CLI |
+| ISS-016 | **Blank Screen on Production** | 17 Dec 2025 | Lazy client init + error screen |
 
 ---
 
@@ -96,5 +98,5 @@
 
 ---
 
-*Last Updated: 17 December 2025 - ISS-014 Resolved (Complete Video Motion Prompt Fix)*
+*Last Updated: 17 December 2025 - ISS-015, ISS-016 Resolved (Netlify Production Deployment Live!)*
 

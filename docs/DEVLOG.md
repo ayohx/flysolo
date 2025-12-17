@@ -58,8 +58,18 @@
 - [x] Quick time selection buttons
 - [x] Video playback CORS fix (blob URL)
 
-### Phase 6: Polish & Production (Planned)
-- [ ] Error handling improvements
+### Phase 6: Netlify Deployment (17 December 2025)
+- [x] Initial GitHub push to https://github.com/ayohx/flysolo.git
+- [x] Netlify configuration (`netlify.toml`)
+- [x] Serverless function for VEO image-to-video (`netlify/functions/generate-video.ts`)
+- [x] Lazy API client initialisation (prevents crash when keys missing)
+- [x] User-friendly error screen for missing API keys
+- [x] Environment variable configuration via Netlify CLI
+- [x] Production deployment to https://flysolo-ai.netlify.app/
+- [x] API key typo fix (O vs 0 character confusion)
+
+### Phase 7: Polish & Production (Planned)
+- [ ] Remove debug logging from production
 - [ ] Rate limiting & quota management
 - [ ] Export functionality
 - [ ] Performance optimisations
@@ -259,6 +269,44 @@ const result = await generatePostVideo(videoPrompt, brandProfile, '5s', editingP
 - Consistent visual identity between image and video
 - Falls back to text-to-video if no image available
 - Requires base64 image data (already stored in `imageUrl`)
+
+### ADR-009: Netlify Deployment with Serverless Functions
+**Date**: 17 December 2025  
+**Status**: Accepted  
+**Context**: Need to deploy to production with proper API key handling and CORS-free video generation
+
+**Decision**: Deploy to Netlify with:
+1. Environment variables for API keys (VITE_* prefix for frontend)
+2. Serverless function for VEO image-to-video (bypasses browser CORS)
+3. Lazy API client initialisation (prevents crash when keys missing)
+4. User-friendly error screen when API keys not configured
+
+**Implementation**:
+```toml
+# netlify.toml
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+```
+
+```typescript
+// Lazy client initialisation
+let aiText: GoogleGenAI | null = null;
+const getTextClient = (): GoogleGenAI => {
+  if (!aiText) {
+    if (!API_KEY) throw new Error('API key not set');
+    aiText = new GoogleGenAI({ apiKey: API_KEY });
+  }
+  return aiText;
+};
+```
+
+**Consequences**:
+- App gracefully handles missing API keys
+- Serverless function enables true image-to-video
+- Environment variables secure (not in source code)
+- Production URL: https://flysolo-ai.netlify.app/
 
 ---
 
@@ -641,6 +689,15 @@ define: {
 ---
 
 ## 📝 Changelog
+
+### v0.7.0 (17 December 2025) - Production Live! 🚀
+- 🚀 **LIVE**: https://flysolo-ai.netlify.app/ is now fully operational
+- 🐛 **API Key Typo Fix**: Fixed `0` (zero) vs `O` (letter) confusion in Netlify env var
+- ✨ **Netlify CLI Integration**: Used `netlify env:set` to fix environment variables
+- ✨ **Debug Logging**: Added API key prefix logging for troubleshooting
+- ✨ **Lazy Client Init**: GoogleGenAI clients now initialise on-demand
+- ✨ **Error Screen**: User-friendly message when API keys missing
+- 📝 Added ADR-009 (Netlify Deployment)
 
 ### v0.6.0 (17 December 2025) - Netlify Deployment Ready
 - 🚀 **GitHub Push**: Initial commit to https://github.com/ayohx/flysolo.git
