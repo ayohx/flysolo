@@ -9,6 +9,13 @@ const IMAGEN_API_KEY = process.env.IMAGEN_API_KEY || API_KEY;
 const VEO_API_KEY = process.env.VEO_API_KEY || API_KEY;
 const VEO_API_KEY_2 = process.env.VEO_API_KEY_2 || VEO_API_KEY;
 
+// Debug: Log API key status (first 10 chars only for security)
+console.log('🔑 API Key Debug:', {
+  hasKey: !!API_KEY,
+  keyPrefix: API_KEY ? API_KEY.substring(0, 10) + '...' : 'EMPTY',
+  keyLength: API_KEY.length,
+});
+
 export const isApiConfigured = (): boolean => {
   return !!API_KEY;
 };
