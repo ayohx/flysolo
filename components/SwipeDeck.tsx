@@ -55,11 +55,12 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
   
   const remainingPosts = posts.length - currentIndex;
   const maxVisibleCards = 5;
+  const isDeckEmpty = currentIndex >= posts.length;
   
   // CRITICAL FIX: Prevent swiping last card when generating
   // This completely eliminates the race condition that causes blank screens
   const isLowOnCards = remainingPosts <= 3;
-  const canSwipe = !(isLowOnCards && isGeneratingMore);
+  const canSwipe = !isDeckEmpty && !(isLowOnCards && isGeneratingMore);
 
   // Animate counter when cards are added
   useEffect(() => {
@@ -75,53 +76,52 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
     }
   }, [remainingPosts, isGeneratingMore, onFetchMore]);
 
-  // Handle End of Deck - FIXED: Always show loading if we're out AND generating
-  // This prevents the blank screen bug when users swipe faster than generation
-  if (currentIndex >= posts.length) {
-    // If we're generating more posts, ALWAYS show loading state
-    // This handles the race condition where user swipes all cards before fetch completes
-    const shouldShowLoading = isGeneratingMore || remainingPosts <= 10;
-    
+  const currentPost = isDeckEmpty ? undefined : posts[currentIndex];
+  const isImageLoading = currentPost ? loadingImages.has(currentPost.id) : false;
+
+  const renderDeckEmptyCard = () => {
+    const showGenerating = isGeneratingMore;
+
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center p-6 animate-fade-in w-full">
-        {shouldShowLoading ? (
-          <div className="flex flex-col items-center">
-            <RefreshCw className="animate-spin text-indigo-400 mb-6" size={40} />
-            <h3 className="text-2xl font-bold text-white mb-2">Designing New Assets...</h3>
-            <p className="text-gray-400">Crafting personalised content based on your preferences.</p>
-            {likedPosts.length > 0 && (
-              <button 
-                onClick={onEmpty}
-                className="mt-6 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm transition-colors"
-              >
-                View Saved Assets ({likedPosts.length})
-              </button>
-            )}
-          </div>
-        ) : (
-          <>
-            <div className="w-20 h-20 bg-gray-800 rounded-full flex items-center justify-center mb-6">
-              <Check className="text-green-400" size={40} />
-            </div>
-            <h3 className="text-2xl font-bold text-white mb-2">Review Complete!</h3>
-            <p className="text-gray-400 mb-8">You've cleared the deck. Great work!</p>
-            <button 
-              onClick={onEmpty}
-              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors"
-            >
-              Go to Dashboard ({likedPosts.length} saved)
-            </button>
-          </>
-        )}
+      <div className="w-full h-full bg-gray-900 rounded-3xl border border-gray-800 shadow-2xl overflow-hidden flex flex-col items-center justify-center text-center p-10">
+        <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mb-5 border border-gray-700">
+          {showGenerating ? (
+            <RefreshCw className="animate-spin text-indigo-400" size={32} />
+          ) : (
+            <Check className="text-green-400" size={32} />
+          )}
+        </div>
+        <h3 className="text-xl font-bold text-white mb-2">
+          {showGenerating ? 'Designing new assets…' : 'No more assets to review'}
+        </h3>
+        <p className="text-gray-400 text-sm max-w-sm">
+          {showGenerating
+            ? 'We’re generating your next batch. You can still review, edit, and schedule any saved assets whilst you wait.'
+            : 'Generate another batch to keep swiping, or open your saved assets to edit and schedule posts.'}
+        </p>
+
+        <div className="mt-6 flex flex-col sm:flex-row items-center gap-3">
+          <button
+            onClick={() => setLikedPanelOpen(true)}
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm transition-colors border border-gray-700"
+          >
+            View saved assets ({likedPosts.length})
+          </button>
+          <button
+            onClick={onFetchMore}
+            disabled={isGeneratingMore}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            {isGeneratingMore ? 'Generating…' : 'Generate more'}
+          </button>
+        </div>
       </div>
     );
-  }
-
-  const currentPost = posts[currentIndex];
-  const isImageLoading = loadingImages.has(currentPost.id);
+  };
 
   // Button-based swipe (still works)
   const handleSwipe = (dir: 'left' | 'right') => {
+    if (!currentPost) return;
     // CRITICAL FIX: Block swiping when we're low on cards and still generating
     // This prevents the blank screen bug completely
     if (!canSwipe) {
@@ -148,7 +148,7 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
     e.stopPropagation();
     
     // Only trigger edit if we haven't moved significantly
-    if (!hasMoved && !isDragging) {
+    if (!hasMoved && !isDragging && currentPost) {
       onEdit(currentPost);
     }
   };
@@ -459,7 +459,7 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
         <div className="relative w-full max-w-md aspect-[4/5] flex items-center justify-center" style={{ transformStyle: 'preserve-3d' }}>
           
           {/* Background Cards (Visual 3D Stack) */}
-          {Array.from({ length: Math.min(maxVisibleCards - 1, remainingPosts - 1) }).map((_, i) => {
+          {Array.from({ length: Math.min(maxVisibleCards - 1, Math.max(0, remainingPosts - 1)) }).map((_, i) => {
             const cardIndex = currentIndex + i + 1;
             if (cardIndex >= posts.length) return null;
             const post = posts[cardIndex];
@@ -501,21 +501,23 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
             onMouseDown={handleMouseDown}
             onTouchStart={handleMouseDown}
           >
-            {renderCardContent(currentPost, isImageLoading, true)}
+            {currentPost ? renderCardContent(currentPost, isImageLoading, true) : renderDeckEmptyCard()}
             
             {/* Edit Button (always visible in corner) */}
-            <div className="absolute bottom-6 right-6">
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEdit(currentPost);
-                }}
-                className="p-3 bg-gray-800 hover:bg-gray-700 rounded-full text-gray-400 hover:text-white transition-colors border border-gray-700 shadow-lg"
-                title="Refine Prompt"
-              >
-                <Edit2 size={18} />
-              </button>
-            </div>
+            {currentPost && (
+              <div className="absolute bottom-6 right-6">
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(currentPost);
+                  }}
+                  className="p-3 bg-gray-800 hover:bg-gray-700 rounded-full text-gray-400 hover:text-white transition-colors border border-gray-700 shadow-lg"
+                  title="Refine Prompt"
+                >
+                  <Edit2 size={18} />
+                </button>
+              </div>
+            )}
 
             {/* Visual Feedback Overlays */}
             {swipeIndicator === 'right' && (
@@ -549,7 +551,11 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
           {!canSwipe && (
             <div className="flex items-center gap-2 text-amber-400 text-sm animate-pulse">
               <RefreshCw size={16} className="animate-spin" />
-              <span>Generating more cards... ({remainingPosts} left)</span>
+              <span>
+                {isDeckEmpty
+                  ? (isGeneratingMore ? 'Generating your next batch…' : 'No more cards — generate another batch.')
+                  : `Generating more cards… (${remainingPosts} left)`}
+              </span>
             </div>
           )}
           

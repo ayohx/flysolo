@@ -815,97 +815,56 @@ User reported three critical production bugs:
 #### Bug 1: Blank Screen - Root Cause Analysis
 **Symptom**: Rapid swiping causes blank screen instead of loading state
 
-**Root Cause**: Race condition in card state management
-```
-User swipes last card → setCurrentIndex(posts.length) → 
-Component re-renders → Check: currentIndex >= posts.length → 
-Shows completion screen BEFORE onFetchMore() sets isGeneratingMore flag
-```
-
-**The Issue**: Window of 50-200ms where:
-- Last card has been swiped
-- Index now equals array length
-- Generation hasn't started yet
-- User sees "Review Complete!" instead of "Generating..."
+**Root Cause**: When the deck is exhausted, the component used an early-return “end of deck” UI that replaced the entire swipe layout. Users could no longer access saved assets whilst waiting, and depending on timing this could look like a blank/empty screen.
 
 **Solution Implemented**:
-1. Added `canSwipe` guard: `!(remainingPosts <= 3 && isGeneratingMore)`
-2. Block all swipe mechanisms when guard is false:
-   - Button clicks
-   - Drag gestures  
-   - Mouse/touch events
-3. Visual feedback:
-   - Disable buttons with opacity
-   - Show warning message: "Generating more cards... (X left)"
-   - Prevent cursor changes
+1. Keep the **full swipe layout** mounted at all times (brand profile + saved assets panel).
+2. Render an **in-deck empty state card** when `currentIndex >= posts.length`:
+   - “Designing new assets…” when generating
+   - “No more assets to review” otherwise
+3. Provide clear CTAs:
+   - **View saved assets** (opens saved panel)
+   - **Generate more** (triggers `onFetchMore()`)
+4. Retain swipe guards so users can’t swipe into an invalid state whilst generation is running.
 
 **Files Modified**:
-- `components/SwipeDeck.tsx` (Lines 64-67, 122-131, 155-163, 540-566)
+- `components/SwipeDeck.tsx`
 
 #### Bug 2: Nike Cacti Problem - Root Cause Analysis
 **Symptom**: Nike brand generating desert/cacti images instead of shoes/athletic gear
 
-**Root Cause**: Visual prompts were TOO ABSTRACT
-- Previous prompt: "A dynamic athletic scene with Nike products"
-- AI interpretation: "Something vaguely sporty" → Desert running trail, no products
-- Missing: Explicit product mentions (Air Max, Jordan, etc.)
+**Root Cause**: Image generation failures were silently falling back to random `picsum.photos` placeholders (often landscapes/deserts), making outputs look off-brand and “low quality”.
 
-**The Issue**: `visualPrompt` field lacked mandatory structure
-- No forced product names from `services` array
-- No composition requirements
-- No explicit color mentions in scene
-- No lighting specifications
+**The Issue**:
+- Single hard-coded Imagen model ID can fail depending on availability/quota.
+- Placeholder fallback content was random and unrelated to the brand.
+- Prompts could reference undefined offerings when profile data was sparse, weakening results.
 
 **Solution Implemented**:
-Enhanced `generateContentIdeas()` with MANDATORY 6-STEP STRUCTURE:
-
-1. **Composition Type**: "Close-up product shot", "Wide angle scene", etc.
-2. **Specific Subject**: EXACT product name from offerings (e.g., "Nike Air Max 270 sneakers")
-3. **Visual Elements**: Match `visualStyle` (e.g., "minimalist studio setup")
-4. **Brand Colors**: Mention exact hex codes IN the scene composition
-5. **Lighting & Mood**: Specific details (e.g., "dramatic studio lighting")
-6. **Style Keywords**: "professional athletic footwear product photography"
-
-**Example Good Prompt**:
-```
-"Close-up product shot of Nike Air Max 270 sneakers in black and white 
-colorway, positioned on a #000000 geometric platform with #FF6B00 accent 
-lighting behind. Minimalist studio composition with dramatic shadows. 
-Professional athletic footwear product photography."
-```
-
-**Verification Checklist**: AI must verify 6 criteria before returning prompts
+1. Added an Imagen **model fallback list** (tries multiple known model IDs).
+2. Replaced Picsum fallback with a **branded placeholder** (brand colour gradient shapes; no random landscapes).
+3. Ensured content generation uses a **safe profile** (non-empty offerings/strategy/colours), avoiding undefined references.
+4. Kept the strict `visualPrompt` structure and validation rules for on-brand composition.
 
 **Files Modified**:
-- `services/geminiService.ts` (Lines 297-388)
+- `services/geminiService.ts`
 
 #### Bug 3: Empty Offerings/Strategy - Root Cause Analysis
 **Symptom**: Brand profile shows empty "Identified Offerings" and "Strategy" sections
 
-**Root Cause**: UI sections were COLLAPSED by default
-```javascript
-const [expandedSections] = useState({
-  offerings: false,  // ← DATA WAS HIDDEN
-  strategy: false,   // ← DATA WAS HIDDEN
-});
-```
-
-**The Issue**: 
-- Data WAS being generated correctly
-- Schema required both fields
-- But UI defaulted to collapsed state
-- Users couldn't see critical information for content generation
+**Root Cause**: Brand analysis can occasionally return sparse `services` or a short `strategy`. Even if the UI is expanded, empty values give the AI too little product context and lead to weak/off-brand generation.
 
 **Solution Implemented**:
-1. Changed default state to `offerings: true, strategy: true`
-2. Enhanced brand analysis prompts to generate better data:
-   - `services`: Must be specific products ("Air Max 270" not "Shoes")
-   - `strategy`: Must be 3-5 sentence paragraph, not one-liner
-   - Added examples: Nike → ["Air Max 270", "Air Jordan 1", "Dri-FIT Running Shirts"]
+1. Added brand profile **normalisation** to guarantee:
+   - `services` is non-empty (fallback heuristics for common industries like athletic footwear/apparel)
+   - `strategy` meets a minimum substance threshold (fallback strategy paragraph)
+   - `colors` always has at least 2-3 usable values
+2. Updated content generation prompts to use the normalised “safe” profile fields.
+3. Kept UI defaults expanded (still valuable for visibility).
 
 **Files Modified**:
-- `components/BrandInfoCard.tsx` (Lines 70-76)
-- `services/geminiService.ts` (Lines 178-207)
+- `services/geminiService.ts`
+- `components/BrandInfoCard.tsx` (previously: expanded sections by default)
 
 ### **D** - Documentation
 

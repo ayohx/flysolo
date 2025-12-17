@@ -56,6 +56,99 @@ const getImageClient = (): GoogleGenAI => {
   return aiImage;
 };
 
+/**
+ * Normalise and safeguard brand profile fields so downstream generation never
+ * ends up with empty offerings/strategy (which causes irrelevant outputs or placeholder fallbacks).
+ */
+const normaliseStringArray = (arr: any): string[] => {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(s => (typeof s === 'string' ? s.trim() : '')).filter(Boolean);
+};
+
+const buildFallbackOfferings = (profile: BrandProfile): string[] => {
+  const haystack = `${profile.name} ${profile.industry} ${profile.products} ${profile.essence || ''}`.toLowerCase();
+
+  // Athletic / footwear / apparel (covers Nike-like brands)
+  if (
+    haystack.includes('nike') ||
+    haystack.includes('footwear') ||
+    haystack.includes('shoe') ||
+    haystack.includes('trainer') ||
+    haystack.includes('sportswear') ||
+    haystack.includes('athletic') ||
+    haystack.includes('running') ||
+    haystack.includes('fitness') ||
+    haystack.includes('apparel')
+  ) {
+    return [
+      'Running shoes',
+      'Training shoes',
+      'Basketball shoes',
+      'Football boots',
+      'Lifestyle trainers',
+      'Performance running tops',
+      'Training tops',
+      'Sports bras',
+      'Performance leggings',
+      'Running shorts',
+      'Track jackets',
+      'Gym bags & accessories',
+    ];
+  }
+
+  // Default (generic but still useful; prevents empty prompts)
+  return [
+    'Core product range',
+    'Signature collection',
+    'Seasonal collection',
+    'Best-selling items',
+    'Limited edition drops',
+    'Bundles & multi-buy offers',
+    'Gift cards',
+    'Online exclusives',
+    'Customer favourites',
+    'New arrivals',
+  ];
+};
+
+const buildFallbackStrategy = (profile: BrandProfile): string => {
+  const name = profile.name || 'this brand';
+  const industry = profile.industry || 'your industry';
+  const vibe = profile.vibe || 'confident and clear';
+
+  return [
+    `Target audience: people actively searching for trustworthy ${industry} options, plus existing customers who already like ${name}.`,
+    `Positioning: highlight what makes ${name} different and why it matters (quality, performance, value, or community).`,
+    `Content tone: ${vibe}. Use short, benefit-led messaging paired with product-first visuals.`,
+    `Channels: prioritise Instagram and TikTok for discovery, and LinkedIn for credibility and storytelling when relevant.`,
+    `Cadence: rotate product spotlights, social proof, and education so the feed stays varied whilst staying on-brand.`,
+  ].join(' ');
+};
+
+const normaliseBrandProfile = (profile: BrandProfile): BrandProfile => {
+  const services = normaliseStringArray((profile as any).services);
+  const colors = normaliseStringArray((profile as any).colors);
+
+  const safeColors =
+    colors.length >= 2
+      ? colors
+      : ['#111827', '#6366f1', '#a855f7']; // dark + indigo + purple defaults
+
+  const safeServices = services.length >= 3 ? services : buildFallbackOfferings(profile);
+  const safeStrategy =
+    typeof profile.strategy === 'string' && profile.strategy.trim().length >= 80
+      ? profile.strategy.trim()
+      : buildFallbackStrategy(profile);
+
+  return {
+    ...profile,
+    colors: safeColors,
+    services: safeServices,
+    strategy: safeStrategy,
+    essence: (profile.essence || '').trim() || profile.name,
+  };
+};
+
 const getVideoClient = (): GoogleGenAI => {
   if (!aiVideo) {
     if (!VEO_API_KEY) throw new Error('VITE_VEO_API_KEY environment variable is not set');
@@ -250,6 +343,7 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
       services: { 
         type: Type.ARRAY, 
         items: { type: Type.STRING },
+        minItems: 10,
         description: "Array of 10-20 SPECIFIC product/service names (NOT generic categories)"
       },
       socialHandles: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Social media URLs/handles" },
@@ -259,6 +353,7 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
       competitors: { type: Type.ARRAY, items: { type: Type.STRING }, description: "3-5 real competitors" },
       strategy: { 
         type: Type.STRING,
+        minLength: 100,
         description: "Detailed 3-5 sentence marketing strategy (minimum 100 characters)"
       },
       essence: { type: Type.STRING, description: "One sentence summary of what this business does" },
@@ -337,7 +432,7 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
     const text = response.text;
     if (!text) throw new Error("No analysis returned from AI");
     
-    const profile = JSON.parse(text) as BrandProfile;
+    const profile = normaliseBrandProfile(JSON.parse(text) as BrandProfile);
     
     console.log("📊 Initial profile quality:", {
       name: profile.name,
@@ -389,7 +484,7 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
       console.warn("⚠️ Initial analysis incomplete:", validationErrors);
       console.log("🔄 Attempting targeted enrichment...");
       
-      const enrichedProfile = await enrichBrandProfile(profile, url, validationErrors);
+      const enrichedProfile = normaliseBrandProfile(await enrichBrandProfile(profile, url, validationErrors));
       
       // Validate enriched profile
       const finalErrors: string[] = [];
@@ -546,28 +641,34 @@ const validateVisualPrompt = (
 export const generateContentIdeas = async (profile: BrandProfile, count: number = 5, customInstruction?: string): Promise<SocialPost[]> => {
   const modelId = "gemini-2.5-flash";
 
+  // Safety: ensure prompts never reference undefined offerings/strategy
+  const safeProfile = normaliseBrandProfile(profile);
+  const offeringsList = safeProfile.services.length > 0 ? safeProfile.services.join(', ') : '';
+  const exampleOfferings = safeProfile.services.slice(0, 3).filter(Boolean);
+  const exampleOfferingsText = exampleOfferings.length > 0 ? exampleOfferings.map(s => `"${s}"`).join(', ') : '"(use an exact product name from the brand)"';
+
   let specificInstruction = "";
   if (customInstruction) {
       specificInstruction = `USER OVERRIDE: The user specifically wants this: "${customInstruction}". IGNORE generic strategy and focus entirely on this request.`;
   }
 
   const prompt = `
-    You are a specialized Social Media Manager for ${profile.name}.
+    You are a specialized Social Media Manager for ${safeProfile.name}.
     
     BRAND CONTEXT:
-    - Industry: ${profile.industry}
-    - What we sell (Summary): ${profile.products}
-    - Specific Offerings: ${profile.services.join(', ')}
-    - Tone: ${profile.vibe}
-    - Strategy: ${profile.strategy}
-    - Brand Essence: ${profile.essence}
+    - Industry: ${safeProfile.industry}
+    - What we sell (Summary): ${safeProfile.products}
+    - Specific Offerings: ${offeringsList}
+    - Tone: ${safeProfile.vibe}
+    - Strategy: ${safeProfile.strategy}
+    - Brand Essence: ${safeProfile.essence}
     
     ${specificInstruction}
 
     Task: Create ${count} distinct, high-quality social media posts.
     
     CRITICAL INSTRUCTION - PRODUCT-SPECIFIC CONTENT:
-    Each post MUST focus on ONE specific offering from the list: ${profile.services.join(', ')}
+    Each post MUST focus on ONE specific offering from the list: ${offeringsList}
     DO NOT be generic. Use the exact product/service name.
     
     PLATFORM RULES (STRICTLY FOLLOW):
@@ -586,26 +687,26 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
     2. SPECIFIC SUBJECT: Name the EXACT product/service from offerings
        ❌ BAD: "athletic shoes"
        ✅ GOOD: "Nike Air Max 90 sneakers" or "Jordan 1 High basketball shoes"
-       - For ${profile.name}: Use exact product names like "${profile.services[0]}", "${profile.services[1]}", etc.
+       - For ${safeProfile.name}: Use exact product names like ${exampleOfferingsText}.
     
     3. VISUAL ELEMENTS: Match brand style
-       - Explicitly incorporate: ${profile.visualStyle}
+       - Explicitly incorporate: ${safeProfile.visualStyle}
        - Example: "minimalist studio setup" or "urban street photography style"
     
     4. BRAND COLORS: Mention these EXACT colors in the scene composition
-       - Primary: ${profile.colors[0]}
-       - Secondary: ${profile.colors[1]}
-       - Accent: ${profile.colors[2] || profile.colors[0]}
-       - Example: "against a ${profile.colors[0]} gradient background with ${profile.colors[1]} accent lighting"
+       - Primary: ${safeProfile.colors[0]}
+       - Secondary: ${safeProfile.colors[1]}
+       - Accent: ${safeProfile.colors[2] || safeProfile.colors[0]}
+       - Example: "against a ${safeProfile.colors[0]} gradient background with ${safeProfile.colors[1]} accent lighting"
     
     5. LIGHTING & MOOD: Be specific
        Examples: "soft golden hour lighting", "dramatic studio lighting", "bright daylight", "moody low-key lighting"
     
     6. STYLE KEYWORDS: End with photography style
-       Examples: "professional ${profile.industry} product photography", "high-end social media marketing imagery", "lifestyle brand photography"
+       Examples: "professional ${safeProfile.industry} product photography", "high-end social media marketing imagery", "lifestyle brand photography"
     
     FULL EXAMPLE of EXCELLENT visualPrompt for Nike:
-    "Close-up product shot of Nike Air Max 270 sneakers in black and white colorway, positioned on a ${profile.colors[0]} geometric platform with ${profile.colors[1]} accent lighting behind. Minimalist studio composition with dramatic shadows. Professional athletic footwear product photography with high-end social media marketing quality."
+    "Close-up product shot of Nike Air Max 270 sneakers in black and white colorway, positioned on a ${safeProfile.colors[0]} geometric platform with ${safeProfile.colors[1]} accent lighting behind. Minimalist studio composition with dramatic shadows. Professional athletic footwear product photography with high-end social media marketing quality."
     
     EXAMPLES of BAD visualPrompts (NEVER DO THIS):
     ❌ "A nice image of our product" - TOO VAGUE
@@ -668,24 +769,26 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
  * CRITICAL: This uses ENHANCED prompt engineering to ensure brand DNA is respected.
  */
 export const generatePostImage = async (visualPrompt: string, profile: BrandProfile, aspectRatio: string = "1:1"): Promise<string | undefined> => {
+  const safeProfile = normaliseBrandProfile(profile);
+
   // ENHANCED prompt engineering - forces brand consistency
   const finalPrompt = `
-    Create a professional social media marketing image for ${profile.name}.
+    Create a professional social media marketing image for ${safeProfile.name}.
     
     BRAND DNA (MUST FOLLOW EXACTLY):
-    - Industry: ${profile.industry}
-    - Visual Style: ${profile.visualStyle}
-    - Exact Brand Colors: ${profile.colors.slice(0, 3).join(', ')} (use these prominently)
-    - Brand Vibe: ${profile.vibe}
-    - Brand Essence: ${profile.essence || profile.name}
+    - Industry: ${safeProfile.industry}
+    - Visual Style: ${safeProfile.visualStyle}
+    - Exact Brand Colors: ${safeProfile.colors.slice(0, 3).join(', ')} (use these prominently)
+    - Brand Vibe: ${safeProfile.vibe}
+    - Brand Essence: ${safeProfile.essence || safeProfile.name}
     
     COMPOSITION & CONTENT:
     ${visualPrompt}
     
     CREATIVE DIRECTION:
     - Use the exact brand colors as primary palette
-    - Match the ${profile.visualStyle} aesthetic precisely
-    - Professional ${profile.industry} photography style
+    - Match the ${safeProfile.visualStyle} aesthetic precisely
+    - Professional ${safeProfile.industry} photography style
     - Modern, high-end social media marketing quality
     - Engaging composition that stops scrolling
     
@@ -697,9 +800,20 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
   `;
 
   try {
-    // Try Imagen 3 model for image generation (uses separate API key)
-    const response = await getImageClient().models.generateImages({
-      model: "imagen-3.0-generate-001",
+    const client = getImageClient();
+    const modelCandidates = [
+      // Try multiple model IDs to survive upstream naming/version changes
+      "imagen-3.0-generate-002",
+      "imagen-3.0-generate-001",
+      "imagen-3.0-fast-generate-001",
+      "imagen-2.0-generate-001",
+    ];
+
+    let lastError: any = null;
+    for (const model of modelCandidates) {
+      try {
+        const response = await client.models.generateImages({
+          model,
       prompt: finalPrompt,
       config: {
         numberOfImages: 1,
@@ -707,30 +821,78 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
       },
     });
 
-    // Get the first generated image
     if (response.generatedImages && response.generatedImages.length > 0) {
       const imageData = response.generatedImages[0].image?.imageBytes;
       if (imageData) {
+            console.log(`✅ Imagen model succeeded: ${model}`);
         return `data:image/png;base64,${imageData}`;
       }
     }
     
-    // Fallback to placeholder images
-    console.log("No image data returned, using placeholder fallback");
-    return getPlaceholderImage(visualPrompt);
+        console.warn(`⚠️ Imagen model returned no images: ${model}`);
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`⚠️ Imagen model failed (${model})`, err?.message || err);
+        continue;
+      }
+    }
+
+    console.error("❌ All Imagen models failed; using branded placeholder", lastError?.message || lastError);
+    return getBrandedPlaceholderImage(safeProfile, visualPrompt);
   } catch (error) {
     console.error("Image generation failed:", error);
-    return getPlaceholderImage(visualPrompt);
+    return getBrandedPlaceholderImage(safeProfile, visualPrompt);
   }
 };
 
 /**
- * Get a placeholder image using Lorem Picsum (reliable service)
+ * Branded placeholder image (no random landscapes) used only when image generation fails.
+ * This keeps the UI stable and avoids confusing, off-brand visuals like deserts/cactuses.
  */
-const getPlaceholderImage = (seed: string = ''): string => {
-  // Lorem Picsum provides reliable placeholder images
-  const id = seed ? seed.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 1000 : Math.floor(Math.random() * 1000);
-  return `https://picsum.photos/seed/${id}/800/800`;
+const toBase64Utf8 = (input: string): string => {
+  // btoa expects Latin-1; encode to UTF-8 safely
+  return btoa(unescape(encodeURIComponent(input)));
+};
+
+const getBrandedPlaceholderImage = (profile: BrandProfile, seed: string = ''): string => {
+  const colors = normaliseStringArray(profile.colors);
+  const c1 = colors[0] || '#111827';
+  const c2 = colors[1] || '#6366f1';
+  const c3 = colors[2] || '#a855f7';
+
+  const seedNum = seed
+    ? seed.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360
+    : 210;
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${c1}"/>
+          <stop offset="55%" stop-color="${c2}"/>
+          <stop offset="100%" stop-color="${c3}"/>
+        </linearGradient>
+        <filter id="blur" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="40"/>
+        </filter>
+      </defs>
+      <rect width="800" height="800" fill="url(#bg)"/>
+      <g filter="url(#blur)" opacity="0.55">
+        <circle cx="220" cy="250" r="190" fill="${c2}"/>
+        <circle cx="610" cy="310" r="220" fill="${c3}"/>
+        <circle cx="430" cy="610" r="240" fill="${c1}"/>
+      </g>
+      <g opacity="0.15">
+        <path d="M0,560 C220,520 300,760 520,720 C660,696 720,580 800,560 L800,800 L0,800 Z" fill="#ffffff"/>
+      </g>
+      <g opacity="0.12" transform="translate(400 400) rotate(${seedNum})">
+        <rect x="-340" y="-6" width="680" height="12" rx="6" fill="#ffffff"/>
+        <rect x="-6" y="-340" width="12" height="680" rx="6" fill="#ffffff"/>
+      </g>
+    </svg>
+  `.trim();
+
+  return `data:image/svg+xml;base64,${toBase64Utf8(svg)}`;
 };
 
 export const refinePost = async (currentPost: SocialPost, instruction: string): Promise<SocialPost> => {
@@ -1038,13 +1200,13 @@ export const generatePostVideo = async (
         
         // Fall back to SDK text-to-video with safe motion prompt
         console.log("🔄 Using text-to-video fallback with safe motion prompt...");
-        const response = await client.models.generateVideos({
-          model: "veo-2.0-generate-001",
+    const response = await client.models.generateVideos({
+      model: "veo-2.0-generate-001",
           prompt: imageToVideoPrompt,
-          config: {
+      config: {
             aspectRatio: "9:16",
-            numberOfVideos: 1,
-            durationSeconds: duration === "5s" ? 5 : 10,
+        numberOfVideos: 1,
+        durationSeconds: duration === "5s" ? 5 : 10,
             personGeneration: "dont_allow",
           },
         });

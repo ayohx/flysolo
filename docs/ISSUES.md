@@ -80,6 +80,9 @@
 | ISS-015 | **Netlify API Key Invalid** | 17 Dec 2025 | Fixed O vs 0 typo via Netlify CLI |
 | ISS-016 | **Blank Screen on Production** | 17 Dec 2025 | Lazy client init + error screen |
 | ISS-017 | **VEO RAI Filter Rejections** | 17 Dec 2025 | Safe motion prompts + REST API fallback |
+| ISS-018 | **Blank Screen After Swiping All Cards** | 17 Dec 2025 | In-deck empty state card + keep saved assets panel available + “Generate more” CTA |
+| ISS-019 | **Off-Brand Images (Random Landscapes)** | 17 Dec 2025 | Replaced Picsum fallback with branded placeholder + added Imagen model fallback list |
+| ISS-020 | **Offerings/Strategy Empty** | 17 Dec 2025 | Normalised brand profile output; ensure offerings/strategy always populated (fallback heuristics) |
 
 ---
 
@@ -99,5 +102,5 @@
 
 ---
 
-*Last Updated: 17 December 2025 - ISS-017 Resolved (VEO Safe Motion Prompts Fix)*
+*Last Updated: 17 December 2025 - ISS-020 Resolved (Deck Empty State + Imagen Fallback + Profile Normalisation)*
 
