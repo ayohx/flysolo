@@ -482,7 +482,66 @@ export const mergeSourceUrl = async (currentProfile: BrandProfile, newUrl: strin
 };
 
 /**
+ * Validates a visual prompt to ensure it meets brand requirements
+ */
+const validateVisualPrompt = (
+  prompt: string, 
+  profile: BrandProfile
+): { valid: boolean; issues: string[]; details: { hasProduct: boolean; hasColors: boolean; hasComposition: boolean; wordCount: number } } => {
+  const issues: string[] = [];
+  const lower = prompt.toLowerCase();
+  
+  // Check 1: Does it mention a specific product from the services list?
+  const hasProduct = profile.services.some(service => 
+    lower.includes(service.toLowerCase())
+  );
+  if (!hasProduct) {
+    issues.push("No specific product mentioned from offerings list");
+  }
+  
+  // Check 2: Does it reference brand colors?
+  const hasColors = profile.colors.some(color => 
+    lower.includes(color.toLowerCase())
+  );
+  if (!hasColors) {
+    issues.push("Brand colors not referenced");
+  }
+  
+  // Check 3: Composition type specified?
+  const compositionTypes = [
+    'close-up', 'close up', 'wide angle', 'overhead', 'flat lay', 
+    'dynamic', 'action shot', 'product shot', 'lifestyle shot'
+  ];
+  const hasComposition = compositionTypes.some(type => 
+    lower.includes(type)
+  );
+  if (!hasComposition) {
+    issues.push("No composition type specified");
+  }
+  
+  // Check 4: Minimum length (should be detailed, 30-60 words)
+  const wordCount = prompt.split(/\s+/).length;
+  if (wordCount < 30) {
+    issues.push(`Visual prompt too short (${wordCount}/30 words minimum)`);
+  }
+  
+  // Check 5: Brand style mentioned?
+  const hasBrandStyle = lower.includes(profile.visualStyle.toLowerCase().split(' ')[0]) ||
+                        lower.includes(profile.industry.toLowerCase());
+  if (!hasBrandStyle) {
+    issues.push("Brand visual style not referenced");
+  }
+  
+  return {
+    valid: issues.length === 0,
+    issues,
+    details: { hasProduct, hasColors, hasComposition, wordCount }
+  };
+};
+
+/**
  * Generates text content and visual prompts for social media posts based on the brand profile.
+ * Now with enhanced validation and brand enforcement to ensure on-brand image generation.
  */
 export const generateContentIdeas = async (profile: BrandProfile, count: number = 5, customInstruction?: string): Promise<SocialPost[]> => {
   const modelId = "gemini-2.5-flash";

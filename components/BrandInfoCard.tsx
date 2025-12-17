@@ -66,13 +66,13 @@ const BrandInfoCard: React.FC<BrandInfoCardProps> = ({
   const [showAddColour, setShowAddColour] = useState(false);
   const [newColour, setNewColour] = useState('#6366f1');
   
-  // Collapsible sections
+  // Collapsible sections - OFFERINGS and STRATEGY now expanded by default
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     essence: true,
     social: true,
     palette: true,
-    offerings: false,
-    strategy: false,
+    offerings: true,  // FIX: Changed from false to true - users need to see this!
+    strategy: true,   // FIX: Changed from false to true - critical for content generation
   });
 
   // Sync when prop updates

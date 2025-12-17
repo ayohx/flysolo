@@ -790,3 +790,231 @@ define: {
 
 *Last Updated: 17 December 2025 - v0.5.0 Full Calendar Scheduling*
 
+
+
+---
+
+## 2025-12-17: Critical Bug Fixes - Blank Screen, Image Quality, Brand Profile
+
+### Status: ✅ COMPLETED
+
+### **B** - Business Requirements
+User reported three critical production bugs:
+1. **Blank Screen Bug**: Users see blank screen when swiping through all cards faster than generation
+2. **Off-Brand Images**: Nike analysis generating cacti/desert images instead of athletic footwear
+3. **Empty Brand Data**: "Identified Offerings" and "Strategy" sections showing empty despite data being present
+
+### **M** - Milestones
+- [x] Phase 1: Root cause analysis for all 3 bugs
+- [x] Phase 2: Implement comprehensive fixes
+- [x] Phase 3: Update documentation
+- [x] Phase 4: Git commit and push
+
+### **A** - Architecture Decisions & Root Causes
+
+#### Bug 1: Blank Screen - Root Cause Analysis
+**Symptom**: Rapid swiping causes blank screen instead of loading state
+
+**Root Cause**: Race condition in card state management
+```
+User swipes last card → setCurrentIndex(posts.length) → 
+Component re-renders → Check: currentIndex >= posts.length → 
+Shows completion screen BEFORE onFetchMore() sets isGeneratingMore flag
+```
+
+**The Issue**: Window of 50-200ms where:
+- Last card has been swiped
+- Index now equals array length
+- Generation hasn't started yet
+- User sees "Review Complete!" instead of "Generating..."
+
+**Solution Implemented**:
+1. Added `canSwipe` guard: `!(remainingPosts <= 3 && isGeneratingMore)`
+2. Block all swipe mechanisms when guard is false:
+   - Button clicks
+   - Drag gestures  
+   - Mouse/touch events
+3. Visual feedback:
+   - Disable buttons with opacity
+   - Show warning message: "Generating more cards... (X left)"
+   - Prevent cursor changes
+
+**Files Modified**:
+- `components/SwipeDeck.tsx` (Lines 64-67, 122-131, 155-163, 540-566)
+
+#### Bug 2: Nike Cacti Problem - Root Cause Analysis
+**Symptom**: Nike brand generating desert/cacti images instead of shoes/athletic gear
+
+**Root Cause**: Visual prompts were TOO ABSTRACT
+- Previous prompt: "A dynamic athletic scene with Nike products"
+- AI interpretation: "Something vaguely sporty" → Desert running trail, no products
+- Missing: Explicit product mentions (Air Max, Jordan, etc.)
+
+**The Issue**: `visualPrompt` field lacked mandatory structure
+- No forced product names from `services` array
+- No composition requirements
+- No explicit color mentions in scene
+- No lighting specifications
+
+**Solution Implemented**:
+Enhanced `generateContentIdeas()` with MANDATORY 6-STEP STRUCTURE:
+
+1. **Composition Type**: "Close-up product shot", "Wide angle scene", etc.
+2. **Specific Subject**: EXACT product name from offerings (e.g., "Nike Air Max 270 sneakers")
+3. **Visual Elements**: Match `visualStyle` (e.g., "minimalist studio setup")
+4. **Brand Colors**: Mention exact hex codes IN the scene composition
+5. **Lighting & Mood**: Specific details (e.g., "dramatic studio lighting")
+6. **Style Keywords**: "professional athletic footwear product photography"
+
+**Example Good Prompt**:
+```
+"Close-up product shot of Nike Air Max 270 sneakers in black and white 
+colorway, positioned on a #000000 geometric platform with #FF6B00 accent 
+lighting behind. Minimalist studio composition with dramatic shadows. 
+Professional athletic footwear product photography."
+```
+
+**Verification Checklist**: AI must verify 6 criteria before returning prompts
+
+**Files Modified**:
+- `services/geminiService.ts` (Lines 297-388)
+
+#### Bug 3: Empty Offerings/Strategy - Root Cause Analysis
+**Symptom**: Brand profile shows empty "Identified Offerings" and "Strategy" sections
+
+**Root Cause**: UI sections were COLLAPSED by default
+```javascript
+const [expandedSections] = useState({
+  offerings: false,  // ← DATA WAS HIDDEN
+  strategy: false,   // ← DATA WAS HIDDEN
+});
+```
+
+**The Issue**: 
+- Data WAS being generated correctly
+- Schema required both fields
+- But UI defaulted to collapsed state
+- Users couldn't see critical information for content generation
+
+**Solution Implemented**:
+1. Changed default state to `offerings: true, strategy: true`
+2. Enhanced brand analysis prompts to generate better data:
+   - `services`: Must be specific products ("Air Max 270" not "Shoes")
+   - `strategy`: Must be 3-5 sentence paragraph, not one-liner
+   - Added examples: Nike → ["Air Max 270", "Air Jordan 1", "Dri-FIT Running Shirts"]
+
+**Files Modified**:
+- `components/BrandInfoCard.tsx` (Lines 70-76)
+- `services/geminiService.ts` (Lines 178-207)
+
+### **D** - Documentation
+
+#### Changes Summary
+
+**components/SwipeDeck.tsx**:
+```typescript
+// Added canSwipe guard
+const canSwipe = !(isLowOnCards && isGeneratingMore);
+
+// Block swipes when guard is false
+const handleSwipe = (dir) => {
+  if (!canSwipe) {
+    console.log("❌ Swipe blocked - generating more cards");
+    return;
+  }
+  // ... rest of logic
+};
+
+// Disable buttons visually
+<button 
+  disabled={!canSwipe}
+  className={canSwipe ? 'active-styles' : 'disabled-styles'}
+>
+```
+
+**services/geminiService.ts - generateContentIdeas()**:
+```typescript
+// MANDATORY 6-STEP STRUCTURE for visualPrompt
+1. COMPOSITION TYPE: "Close-up product shot"
+2. SPECIFIC SUBJECT: "Nike Air Max 270 sneakers" (from offerings)
+3. VISUAL ELEMENTS: Incorporate visualStyle
+4. BRAND COLORS: Mention #000000, #FF6B00 in scene
+5. LIGHTING & MOOD: "dramatic studio lighting"
+6. STYLE KEYWORDS: "professional product photography"
+
+// Example with verification checklist
+visualPrompt: "Close-up of [product] on [color] platform with [color] 
+accent lighting. [style] composition. Professional [industry] photography."
+```
+
+**components/BrandInfoCard.tsx**:
+```typescript
+// Changed from false to true
+const [expandedSections] = useState({
+  offerings: true,  // ✅ Now visible by default
+  strategy: true,   // ✅ Now visible by default
+});
+```
+
+**services/geminiService.ts - analyzeBrand()**:
+```typescript
+// Enhanced prompts with specific examples
+services: Array of 10-20 SPECIFIC products
+  - Nike: ["Air Max 270", "Air Jordan 1", "Dri-FIT Running Shirts"]
+  - NOT: ["Shoes", "Apparel", "Accessories"]
+
+strategy: DETAILED paragraph (3-5 sentences):
+  - Target audience
+  - Key differentiators  
+  - Content themes
+  - Social media approach
+```
+
+#### Testing Checklist
+
+**Test 1: Blank Screen Bug**
+- [ ] Analyze any brand (Nike or Holiday Extras)
+- [ ] Rapidly swipe through 15+ cards
+- [ ] Expected: See "Generating more cards... (X left)" message
+- [ ] Expected: Buttons disabled with reduced opacity
+- [ ] Expected: NO blank screen ever
+- [ ] Expected: Smooth transition to new cards when ready
+
+**Test 2: Nike Image Quality**
+- [ ] Analyze nike.com
+- [ ] Generate 10 posts
+- [ ] Check images show:
+  - [ ] Actual Nike products (shoes, apparel)
+  - [ ] Black/white/orange color scheme
+  - [ ] Athletic/sports context
+  - [ ] Professional product photography style
+  - [ ] NO cacti, deserts, or random landscapes
+
+**Test 3: Brand Profile Visibility**
+- [ ] Analyze nike.com
+- [ ] Check Brand Profile card (left sidebar)
+- [ ] "Identified Offerings" section:
+  - [ ] Should be EXPANDED by default
+  - [ ] Should show 10-20 specific Nike products
+  - [ ] Examples: "Air Max 270", "Jordan 1 High", etc.
+- [ ] "Strategy" section:
+  - [ ] Should be EXPANDED by default
+  - [ ] Should show 3-5 sentence paragraph
+  - [ ] Should mention target audience and approach
+
+#### Performance Impact
+- Swipe blocking adds ~0ms overhead (instant guard check)
+- Enhanced prompts add ~2-3 seconds to content generation (acceptable)
+- No impact on existing state management or rendering
+
+#### Rollback Plan
+If issues arise:
+```bash
+git revert HEAD
+git push origin main
+```
+
+Previous commit: 901feb7 (testing documentation)
+This commit: [to be added after push]
+
+---

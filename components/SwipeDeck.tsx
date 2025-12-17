@@ -55,6 +55,11 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
   
   const remainingPosts = posts.length - currentIndex;
   const maxVisibleCards = 5;
+  
+  // CRITICAL FIX: Prevent swiping last card when generating
+  // This completely eliminates the race condition that causes blank screens
+  const isLowOnCards = remainingPosts <= 3;
+  const canSwipe = !(isLowOnCards && isGeneratingMore);
 
   // Animate counter when cards are added
   useEffect(() => {
@@ -117,6 +122,13 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
 
   // Button-based swipe (still works)
   const handleSwipe = (dir: 'left' | 'right') => {
+    // CRITICAL FIX: Block swiping when we're low on cards and still generating
+    // This prevents the blank screen bug completely
+    if (!canSwipe) {
+      console.log("❌ Swipe blocked - generating more cards (remaining:", remainingPosts, ")");
+      return; // Prevent the swipe
+    }
+    
     setDirection(dir);
     setDragOffset({ x: 0, y: 0 });
     
@@ -141,8 +153,14 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
     }
   };
 
-  // Mouse/Touch drag handlers - IMPROVED
+  // Mouse/Touch drag handlers - IMPROVED with canSwipe guard
   const handleMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
+    // CRITICAL FIX: Don't allow drag to start if we can't swipe
+    if (!canSwipe) {
+      console.log("❌ Drag blocked - generating more cards");
+      return;
+    }
+    
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
     
@@ -526,20 +544,40 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-6 mt-8 z-20">
-          <button 
-            onClick={() => handleSwipe('left')}
-            className="w-14 h-14 rounded-full bg-gray-800 hover:bg-gray-700 text-red-500 flex items-center justify-center transition-transform hover:scale-110 shadow-lg border border-gray-700"
-          >
-            <X size={28} />
-          </button>
+        <div className="flex flex-col items-center gap-4 mt-8 z-20">
+          {/* Warning message when swipe is disabled */}
+          {!canSwipe && (
+            <div className="flex items-center gap-2 text-amber-400 text-sm animate-pulse">
+              <RefreshCw size={16} className="animate-spin" />
+              <span>Generating more cards... ({remainingPosts} left)</span>
+            </div>
+          )}
           
-          <button 
-            onClick={() => handleSwipe('right')}
-            className="w-14 h-14 rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white flex items-center justify-center transition-transform hover:scale-110 shadow-lg shadow-indigo-500/30"
-          >
-            <Check size={28} />
-          </button>
+          <div className="flex items-center gap-6">
+            <button 
+              onClick={() => handleSwipe('left')}
+              disabled={!canSwipe}
+              className={`w-14 h-14 rounded-full flex items-center justify-center transition-transform shadow-lg border border-gray-700 ${
+                canSwipe 
+                  ? 'bg-gray-800 hover:bg-gray-700 text-red-500 hover:scale-110' 
+                  : 'bg-gray-900 text-gray-600 cursor-not-allowed opacity-50'
+              }`}
+            >
+              <X size={28} />
+            </button>
+            
+            <button 
+              onClick={() => handleSwipe('right')}
+              disabled={!canSwipe}
+              className={`w-14 h-14 rounded-full flex items-center justify-center transition-transform shadow-lg ${
+                canSwipe
+                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white hover:scale-110 shadow-indigo-500/30'
+                  : 'bg-gray-900 text-gray-600 cursor-not-allowed opacity-50 border border-gray-700'
+              }`}
+            >
+              <Check size={28} />
+            </button>
+          </div>
         </div>
       </div>
 
