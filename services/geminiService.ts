@@ -323,10 +323,24 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
     2. **Instagram/TikTok**: Content MUST be visual-first. Short, punchy captions (under 30 words).
     3. **Twitter/X**: Short, provocative, or news-centric.
     
-    VISUAL PROMPT RULES:
-    - The 'visualPrompt' must explicitly describe an image that fits the brand's Visual Style: "${profile.visualStyle}".
-    - You MUST explicitly instruct to use the brand colours: ${profile.colors.join(', ')}.
-    - The image MUST depict the specific service/product being discussed.
+    VISUAL PROMPT RULES (CRITICAL FOR IMAGE QUALITY):
+    The 'visualPrompt' field is THE MOST IMPORTANT part - it controls image generation quality.
+    
+    MANDATORY STRUCTURE FOR visualPrompt:
+    1. START with exact composition/scene description (e.g., "Close-up shot of...", "Wide angle view of...")
+    2. SPECIFY the exact subject/product being featured from the offerings list
+    3. INCLUDE specific visual elements that match: "${profile.visualStyle}"
+    4. EXPLICITLY mention these exact brand colors in the scene: ${profile.colors.slice(0, 3).join(', ')}
+    5. ADD lighting/mood details (e.g., "soft golden hour lighting", "dramatic studio lighting")
+    6. END with style keywords (e.g., "professional ${profile.industry} photography", "high-end marketing imagery")
+    
+    EXAMPLE of a GOOD visualPrompt:
+    "Close-up product shot of [specific offering] against a ${profile.colors[0]} gradient background, with ${profile.colors[1]} accent lighting. ${profile.visualStyle} composition with professional studio lighting. High-end ${profile.industry} marketing photography."
+    
+    EXAMPLE of a BAD visualPrompt (DO NOT DO THIS):
+    "A nice image of our product" ❌ TOO VAGUE
+    
+    Each visualPrompt must be 30-50 words of specific visual direction.
 
     Return a JSON array of posts.
   `;
@@ -370,19 +384,35 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
 
 /**
  * Generates an image for a specific post using Imagen 3 model.
+ * CRITICAL: This uses ENHANCED prompt engineering to ensure brand DNA is respected.
  */
 export const generatePostImage = async (visualPrompt: string, profile: BrandProfile, aspectRatio: string = "1:1"): Promise<string | undefined> => {
-  // Construct a prompt that enforces brand identity
+  // ENHANCED prompt engineering - forces brand consistency
   const finalPrompt = `
-    High-quality social media photograph.
+    Create a professional social media marketing image for ${profile.name}.
     
-    Subject/Action: ${visualPrompt}
+    BRAND DNA (MUST FOLLOW EXACTLY):
+    - Industry: ${profile.industry}
+    - Visual Style: ${profile.visualStyle}
+    - Exact Brand Colors: ${profile.colors.slice(0, 3).join(', ')} (use these prominently)
+    - Brand Vibe: ${profile.vibe}
+    - Brand Essence: ${profile.essence || profile.name}
     
-    Style: ${profile.visualStyle}.
-    Colour theme: ${profile.colors.slice(0, 3).join(', ')}.
-    Brand essence: Professional ${profile.industry} imagery for "${profile.name}".
+    COMPOSITION & CONTENT:
+    ${visualPrompt}
     
-    Requirements: No text, no logos, photorealistic, high resolution.
+    CREATIVE DIRECTION:
+    - Use the exact brand colors as primary palette
+    - Match the ${profile.visualStyle} aesthetic precisely
+    - Professional ${profile.industry} photography style
+    - Modern, high-end social media marketing quality
+    - Engaging composition that stops scrolling
+    
+    TECHNICAL REQUIREMENTS:
+    - No text, no logos, no watermarks
+    - Sharp focus, professional lighting
+    - Social media optimized (high engagement potential)
+    - Photorealistic quality
   `;
 
   try {

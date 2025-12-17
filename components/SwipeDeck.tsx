@@ -61,23 +61,37 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
     setPrevRemaining(remainingPosts);
   }, [remainingPosts]);
 
-  // Infinite Scroll Trigger
+  // Infinite Scroll Trigger - IMPROVED with eager loading
   useEffect(() => {
-    if (remainingPosts <= 5 && !isGeneratingMore && remainingPosts > 0) {
-      console.log("Low on cards, fetching more...");
+    // Trigger earlier (at 10 cards) to prevent blank screen when swiping fast
+    if (remainingPosts <= 10 && !isGeneratingMore && remainingPosts > 0) {
+      console.log("🔄 Low on cards, fetching more... (remaining:", remainingPosts, ")");
       onFetchMore();
     }
   }, [remainingPosts, isGeneratingMore, onFetchMore]);
 
-  // Handle End of Deck
+  // Handle End of Deck - FIXED: Always show loading if we're out AND generating
+  // This prevents the blank screen bug when users swipe faster than generation
   if (currentIndex >= posts.length) {
+    // If we're generating more posts, ALWAYS show loading state
+    // This handles the race condition where user swipes all cards before fetch completes
+    const shouldShowLoading = isGeneratingMore || remainingPosts <= 10;
+    
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-6 animate-fade-in w-full">
-        {isGeneratingMore ? (
+        {shouldShowLoading ? (
           <div className="flex flex-col items-center">
             <RefreshCw className="animate-spin text-indigo-400 mb-6" size={40} />
             <h3 className="text-2xl font-bold text-white mb-2">Designing New Assets...</h3>
             <p className="text-gray-400">Crafting personalised content based on your preferences.</p>
+            {likedPosts.length > 0 && (
+              <button 
+                onClick={onEmpty}
+                className="mt-6 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm transition-colors"
+              >
+                View Saved Assets ({likedPosts.length})
+              </button>
+            )}
           </div>
         ) : (
           <>
@@ -85,12 +99,12 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
               <Check className="text-green-400" size={40} />
             </div>
             <h3 className="text-2xl font-bold text-white mb-2">Review Complete!</h3>
-            <p className="text-gray-400 mb-8">You've cleared the deck.</p>
+            <p className="text-gray-400 mb-8">You've cleared the deck. Great work!</p>
             <button 
               onClick={onEmpty}
               className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors"
             >
-              Go to Dashboard
+              Go to Dashboard ({likedPosts.length} saved)
             </button>
           </>
         )}
