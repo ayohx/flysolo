@@ -867,7 +867,8 @@ const toBase64Utf8 = (input: string): string => {
 };
 
 const getBrandedPlaceholderImage = (profile: BrandProfile, seed: string = ''): string => {
-  const colors = normaliseStringArray(profile.colors);
+  // Ensure colors are valid hex strings
+  const colors = normaliseStringArray(profile.colors).map(c => c.startsWith('#') ? c : '#CCCCCC');
   const c1 = colors[0] || '#111827';
   const c2 = colors[1] || '#6366f1';
   const c3 = colors[2] || '#a855f7';
@@ -901,6 +902,9 @@ const getBrandedPlaceholderImage = (profile: BrandProfile, seed: string = ''): s
         <rect x="-340" y="-6" width="680" height="12" rx="6" fill="#ffffff"/>
         <rect x="-6" y="-340" width="12" height="680" rx="6" fill="#ffffff"/>
       </g>
+      <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="48" fill="#ffffff" opacity="0.8">
+        ${profile.name}
+      </text>
     </svg>
   `.trim();
 
