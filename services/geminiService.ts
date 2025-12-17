@@ -115,117 +115,308 @@ export const validateUrlAccessibility = async (url: string): Promise<{ valid: bo
 };
 
 /**
- * Analyzes the provided website URL.
- * Uses a two-step approach: 1) Google Search for research, 2) Structured JSON extraction
+ * Helper function to enrich incomplete brand profiles with targeted queries
  */
-export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
+const enrichBrandProfile = async (
+  baseProfile: BrandProfile, 
+  url: string, 
+  issues: string[]
+): Promise<BrandProfile> => {
   const modelId = "gemini-2.5-flash";
   
-  // Step 1: Research the brand using Google Search (no JSON format)
-  console.log("Step 1: Researching brand with Google Search...");
+  console.log("🔄 Enriching incomplete profile...", issues);
   
-  const researchPrompt = `
-    Research the business at this URL: ${url}
-    
-    Find and report:
-    1. The exact business name
-    2. What industry they're in (be specific - e.g., "Travel Services" not just "Tech")
-    3. Their main products and services (list 10-20 specific offerings)
-    4. Their social media handles/URLs
-    5. Their brand colours (hex codes if visible)
-    6. Their brand voice/tone
-    7. Their main competitors
-    
-    Be thorough and accurate. This is for a marketing analysis.
-  `;
-
-  let researchData = "";
-  try {
-    const researchResponse = await aiText.models.generateContent({
-      model: modelId,
-      contents: researchPrompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-      },
-    });
-    researchData = researchResponse.text || "";
-    console.log("Research complete, got", researchData.length, "chars");
-  } catch (err) {
-    console.warn("Google Search failed, using direct knowledge...", err);
+  // Build targeted enrichment query
+  let enrichmentQuery = `I need more detailed information about ${baseProfile.name} (${url}).\n\n`;
+  
+  if (issues.some(i => i.includes('services'))) {
+    enrichmentQuery += `
+      CRITICAL: Find their SPECIFIC product/service names.
+      Search for:
+      - Product catalog pages
+      - Service listing pages
+      - Menu/navigation items
+      - "What we offer" sections
+      
+      Return 15-20 SPECIFIC items they sell/offer.
+      NOT categories, NOT generic descriptions.
+      ACTUAL product names or service packages.
+      
+      Examples of GOOD data:
+      - Nike: "Air Max 270", "Jordan 1 High", "Dri-FIT Running Shorts"
+      - Restaurant: "Margherita Pizza", "Caesar Salad", "Tiramisu"
+      - Travel: "Gatwick Airport Parking", "Heathrow Executive Lounge"
+    `;
   }
-
-  // Step 2: Parse research into structured JSON
-  console.log("Step 2: Structuring brand profile...");
   
-  const schema = {
+  if (issues.some(i => i.includes('strategy'))) {
+    enrichmentQuery += `
+      CRITICAL: Analyze their marketing approach.
+      Look for:
+      - Target audience indicators (age, demographics on site)
+      - Brand messaging and tone
+      - Competitor positioning
+      - Social media presence and style
+      - Unique selling propositions
+      
+      Write a detailed 3-5 sentence marketing strategy covering:
+      1. WHO (target audience)
+      2. WHAT (differentiators)
+      3. HOW (content approach)
+      4. WHERE (channels)
+      5. WHY (value proposition)
+    `;
+  }
+  
+  const enrichmentPrompt = `
+    ${enrichmentQuery}
+    
+    Current incomplete data:
+    Services: ${baseProfile.services?.join(', ') || 'EMPTY - NEEDS 10+ SPECIFIC ITEMS'}
+    Strategy: ${baseProfile.strategy || 'EMPTY - NEEDS 100+ CHAR PARAGRAPH'}
+    
+    Return ONLY the enriched brand profile as JSON with complete data.
+  `;
+  
+  const enrichedSchema = {
     type: Type.OBJECT,
     properties: {
       name: { type: Type.STRING },
       industry: { type: Type.STRING },
-      products: { type: Type.STRING, description: "Overview of what they sell" },
-      services: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of 10-20 specific items/products" },
-      socialHandles: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of social links or handles" },
-      colors: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Hex codes" },
+      products: { type: Type.STRING },
+      services: { type: Type.ARRAY, items: { type: Type.STRING } },
+      socialHandles: { type: Type.ARRAY, items: { type: Type.STRING } },
+      colors: { type: Type.ARRAY, items: { type: Type.STRING } },
       vibe: { type: Type.STRING },
-      visualStyle: { type: Type.STRING, description: "Art direction for image generation" },
+      visualStyle: { type: Type.STRING },
       competitors: { type: Type.ARRAY, items: { type: Type.STRING } },
       strategy: { type: Type.STRING },
+      essence: { type: Type.STRING },
+      confidence: { type: Type.NUMBER },
+    },
+    required: ["services", "strategy"],
+  };
+  
+  try {
+    const response = await getTextClient().models.generateContent({
+      model: modelId,
+      contents: enrichmentPrompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: enrichedSchema,
+      },
+    });
+    
+    const enriched = JSON.parse(response.text || "{}") as BrandProfile;
+    
+    console.log("✅ Enrichment complete:", {
+      servicesCount: enriched.services?.length || 0,
+      strategyLength: enriched.strategy?.length || 0,
+    });
+    
+    // Merge with base profile, preferring enriched data if better
+    return {
+      ...baseProfile,
+      services: enriched.services && enriched.services.length >= 10 
+        ? enriched.services 
+        : baseProfile.services,
+      strategy: enriched.strategy && enriched.strategy.length >= 100
+        ? enriched.strategy
+        : baseProfile.strategy,
+    };
+  } catch (error) {
+    console.error("❌ Enrichment failed, returning base profile:", error);
+    return baseProfile;
+  }
+};
+
+/**
+ * Analyzes the provided website URL with enhanced validation and enrichment.
+ * Uses combined research + extraction approach with quality gates.
+ */
+export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
+  const modelId = "gemini-2.5-flash";
+  
+  console.log("🔍 Analyzing brand with enhanced validation...");
+  
+  // Enhanced schema with strict requirements
+  const enhancedSchema = {
+    type: Type.OBJECT,
+    properties: {
+      name: { type: Type.STRING },
+      industry: { type: Type.STRING },
+      products: { type: Type.STRING, description: "2-3 sentence overview of what they sell" },
+      services: { 
+        type: Type.ARRAY, 
+        items: { type: Type.STRING },
+        description: "Array of 10-20 SPECIFIC product/service names (NOT generic categories)"
+      },
+      socialHandles: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Social media URLs/handles" },
+      colors: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Brand hex color codes" },
+      vibe: { type: Type.STRING, description: "Brand voice/personality" },
+      visualStyle: { type: Type.STRING, description: "Art direction for image generation" },
+      competitors: { type: Type.ARRAY, items: { type: Type.STRING }, description: "3-5 real competitors" },
+      strategy: { 
+        type: Type.STRING,
+        description: "Detailed 3-5 sentence marketing strategy (minimum 100 characters)"
+      },
       essence: { type: Type.STRING, description: "One sentence summary of what this business does" },
       confidence: { type: Type.NUMBER, description: "Confidence score 0-100 on data quality" },
     },
     required: ["name", "industry", "products", "services", "socialHandles", "colors", "vibe", "visualStyle", "competitors", "strategy", "essence", "confidence"],
   };
 
-  const structurePrompt = `
-    Based on this research about the business at ${url}:
+  // Combined research + extraction prompt
+  const combinedPrompt = `
+    Research and analyze the business at: ${url}
     
-    ${researchData || "No research data available - use your knowledge about this URL."}
+    Use Google Search to find comprehensive information about this business.
     
-    Create a comprehensive brand profile with:
-    1. name: Exact business name
-    2. industry: Specific industry (e.g., "Travel & Airport Services", "E-commerce Fashion")
-    3. products: Paragraph describing what they sell
-    4. services: Array of 10-20 SPECIFIC services/products they offer
-    5. socialHandles: Array of their social media URLs/handles
-    6. colors: Array of brand hex colour codes (make educated guesses if not found)
-    7. vibe: Their brand voice/personality
-    8. visualStyle: Art direction for generating on-brand images
-    9. competitors: 3 real competitors
-    10. strategy: Marketing strategy tailored to their offerings
-    11. essence: One sentence describing what they do
-    12. confidence: Score 0-100 on how much real data you found
+    CRITICAL DATA REQUIREMENTS:
     
-    Return valid JSON.
+    1. SERVICES/PRODUCTS (MINIMUM 10 ITEMS - THIS IS MANDATORY):
+       - Find SPECIFIC product names, service offerings, or packages
+       - DO NOT use generic categories like "footwear", "services", "products"
+       - BE SPECIFIC: exact names, model numbers, package titles
+       
+       Examples by industry:
+       - Retail/Fashion: "Air Max 270", "Jordan 1 High", "Dri-FIT Running Shorts"
+       - Food/Restaurant: "Margherita Pizza", "Caesar Salad", "Tiramisu"
+       - Travel: "Gatwick Airport Parking", "Heathrow Lounge Access", "Hotel + Parking Package"
+       - Services: "SEO Audit Package", "Full Website Redesign", "Monthly Maintenance Plan"
+       - SaaS: "Starter Plan", "Business Plan", "Enterprise Plan"
+       
+       Search strategies:
+       - Check navigation menu items
+       - Look for product/service catalog pages
+       - Find pricing pages
+       - Check "What we offer" sections
+       
+       If you find fewer than 10, search more specifically:
+       - "${url} products"
+       - "${url} services offered"
+       - "${url} what do they sell"
+    
+    2. MARKETING STRATEGY (MINIMUM 100 CHARACTERS - BE DETAILED):
+       Must be a substantive paragraph (3-5 sentences) covering:
+       
+       - WHO: Target audience (demographics, psychographics)
+       - WHAT: Key differentiators from competitors
+       - HOW: Content positioning and tone
+       - WHERE: Primary channels and platforms
+       - WHY: Value proposition and unique benefits
+       
+       Example for Nike:
+       "Target audience: Athletes and fitness enthusiasts aged 18-45 who value performance 
+       and style. Differentiation through innovation (Air technology) and athlete 
+       endorsements. Content should be motivational and aspirational, showcasing real 
+       athletes and everyday fitness journeys. Focus on Instagram and TikTok for younger 
+       demographics, emphasizing Just Do It messaging and community building."
+    
+    3. VALIDATION BEFORE RETURNING:
+       - Count services: must have ≥10 items
+       - Check specificity: no generic words like "products", "services"
+       - Strategy length: must be ≥100 characters
+       - Strategy substance: must cover audience + differentiators + approach
+    
+    Return complete brand profile as JSON.
   `;
 
   try {
-    const structureResponse = await aiText.models.generateContent({
+    const response = await getTextClient().models.generateContent({
       model: modelId,
-      contents: structurePrompt,
+      contents: combinedPrompt,
       config: {
+        tools: [{ googleSearch: {} }], // Research capability
         responseMimeType: "application/json",
-        responseSchema: schema,
+        responseSchema: enhancedSchema,
       },
     });
 
-    const text = structureResponse.text;
-    if (!text) {
-      throw new Error("No analysis returned from AI");
-    }
+    const text = response.text;
+    if (!text) throw new Error("No analysis returned from AI");
     
     const profile = JSON.parse(text) as BrandProfile;
     
-    // Validate we got real data
-    if (profile.confidence && profile.confidence < 20) {
-      throw new Error("Insufficient data found about this business. Please ensure the URL is correct.");
+    console.log("📊 Initial profile quality:", {
+      name: profile.name,
+      servicesCount: profile.services?.length || 0,
+      strategyLength: profile.strategy?.length || 0,
+      confidence: profile.confidence,
+    });
+    
+    // Enhanced validation with specific quality gates
+    const validationErrors: string[] = [];
+    
+    // Check 1: Sufficient services count
+    if (!profile.services || profile.services.length < 10) {
+      validationErrors.push(`Insufficient services data (${profile.services?.length || 0}/10 minimum)`);
     }
     
+    // Check 2: Services are specific, not generic
+    const genericTerms = ['product', 'service', 'offering', 'solution', 'item'];
+    const hasGenericServices = profile.services?.some(s => {
+      const lower = s.toLowerCase();
+      return genericTerms.some(term => lower === term || lower === `${term}s`);
+    });
+    if (hasGenericServices) {
+      validationErrors.push("Services contain generic categories instead of specific names");
+    }
+    
+    // Check 3: Strategy is detailed enough
+    if (!profile.strategy || profile.strategy.length < 100) {
+      validationErrors.push(`Strategy too brief (${profile.strategy?.length || 0}/100 chars minimum)`);
+    }
+    
+    // Check 4: Strategy has substance (not just generic filler)
+    const hasSubstance = profile.strategy && (
+      profile.strategy.toLowerCase().includes('target') ||
+      profile.strategy.toLowerCase().includes('audience') ||
+      profile.strategy.toLowerCase().includes('customer')
+    );
+    if (!hasSubstance) {
+      validationErrors.push("Strategy lacks target audience definition");
+    }
+    
+    // Check 5: Confidence threshold
+    if (profile.confidence && profile.confidence < 20) {
+      validationErrors.push("Low confidence score indicates insufficient data");
+    }
+    
+    // If validation fails, attempt enrichment
+    if (validationErrors.length > 0) {
+      console.warn("⚠️ Initial analysis incomplete:", validationErrors);
+      console.log("🔄 Attempting targeted enrichment...");
+      
+      const enrichedProfile = await enrichBrandProfile(profile, url, validationErrors);
+      
+      // Validate enriched profile
+      const finalErrors: string[] = [];
+      if (!enrichedProfile.services || enrichedProfile.services.length < 10) {
+        finalErrors.push("Still insufficient services after enrichment");
+      }
+      if (!enrichedProfile.strategy || enrichedProfile.strategy.length < 100) {
+        finalErrors.push("Strategy still too brief after enrichment");
+      }
+      
+      if (finalErrors.length > 0) {
+        console.error("❌ Enrichment failed to meet requirements:", finalErrors);
+        console.log("Returning best-effort profile with warnings");
+      } else {
+        console.log("✅ Enrichment successful - profile now complete");
+      }
+      
+      return enrichedProfile;
+    }
+    
+    console.log("✅ Initial analysis passed all validation");
     return profile;
 
   } catch (error: any) {
     console.error("Brand analysis failed:", error);
     throw new Error(
-      error.message || "Could not analyse website. Please ensure the URL is correct and the website is active."
+      error.message || "Could not analyze website. Please ensure the URL is correct and the website is active."
     );
   }
 };
@@ -302,7 +493,7 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
   }
 
   const prompt = `
-    You are a specialised Social Media Manager for ${profile.name}.
+    You are a specialized Social Media Manager for ${profile.name}.
     
     BRAND CONTEXT:
     - Industry: ${profile.industry}
@@ -310,39 +501,70 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
     - Specific Offerings: ${profile.services.join(', ')}
     - Tone: ${profile.vibe}
     - Strategy: ${profile.strategy}
+    - Brand Essence: ${profile.essence}
     
     ${specificInstruction}
 
     Task: Create ${count} distinct, high-quality social media posts.
     
-    CRITICAL INSTRUCTION:
-    Each post MUST focus on one specific offering from the 'Specific Offerings' list above. Do not be generic.
+    CRITICAL INSTRUCTION - PRODUCT-SPECIFIC CONTENT:
+    Each post MUST focus on ONE specific offering from the list: ${profile.services.join(', ')}
+    DO NOT be generic. Use the exact product/service name.
     
     PLATFORM RULES (STRICTLY FOLLOW):
     1. **LinkedIn**: Content MUST be long-form (100-200 words). Professional tone. Focus on industry insights.
     2. **Instagram/TikTok**: Content MUST be visual-first. Short, punchy captions (under 30 words).
     3. **Twitter/X**: Short, provocative, or news-centric.
     
-    VISUAL PROMPT RULES (CRITICAL FOR IMAGE QUALITY):
-    The 'visualPrompt' field is THE MOST IMPORTANT part - it controls image generation quality.
+    VISUAL PROMPT RULES (ABSOLUTELY CRITICAL - THIS CONTROLS IMAGE QUALITY):
+    The 'visualPrompt' field determines what image gets generated. It MUST be extremely specific.
     
-    MANDATORY STRUCTURE FOR visualPrompt:
-    1. START with exact composition/scene description (e.g., "Close-up shot of...", "Wide angle view of...")
-    2. SPECIFY the exact subject/product being featured from the offerings list
-    3. INCLUDE specific visual elements that match: "${profile.visualStyle}"
-    4. EXPLICITLY mention these exact brand colors in the scene: ${profile.colors.slice(0, 3).join(', ')}
-    5. ADD lighting/mood details (e.g., "soft golden hour lighting", "dramatic studio lighting")
-    6. END with style keywords (e.g., "professional ${profile.industry} photography", "high-end marketing imagery")
+    MANDATORY 6-STEP STRUCTURE for visualPrompt (ALL REQUIRED):
     
-    EXAMPLE of a GOOD visualPrompt:
-    "Close-up product shot of [specific offering] against a ${profile.colors[0]} gradient background, with ${profile.colors[1]} accent lighting. ${profile.visualStyle} composition with professional studio lighting. High-end ${profile.industry} marketing photography."
+    1. COMPOSITION TYPE: Start with exact framing
+       Examples: "Close-up product shot", "Wide angle scene", "Overhead flat lay", "Dynamic action shot"
     
-    EXAMPLE of a BAD visualPrompt (DO NOT DO THIS):
-    "A nice image of our product" ❌ TOO VAGUE
+    2. SPECIFIC SUBJECT: Name the EXACT product/service from offerings
+       ❌ BAD: "athletic shoes"
+       ✅ GOOD: "Nike Air Max 90 sneakers" or "Jordan 1 High basketball shoes"
+       - For ${profile.name}: Use exact product names like "${profile.services[0]}", "${profile.services[1]}", etc.
     
-    Each visualPrompt must be 30-50 words of specific visual direction.
+    3. VISUAL ELEMENTS: Match brand style
+       - Explicitly incorporate: ${profile.visualStyle}
+       - Example: "minimalist studio setup" or "urban street photography style"
+    
+    4. BRAND COLORS: Mention these EXACT colors in the scene composition
+       - Primary: ${profile.colors[0]}
+       - Secondary: ${profile.colors[1]}
+       - Accent: ${profile.colors[2] || profile.colors[0]}
+       - Example: "against a ${profile.colors[0]} gradient background with ${profile.colors[1]} accent lighting"
+    
+    5. LIGHTING & MOOD: Be specific
+       Examples: "soft golden hour lighting", "dramatic studio lighting", "bright daylight", "moody low-key lighting"
+    
+    6. STYLE KEYWORDS: End with photography style
+       Examples: "professional ${profile.industry} product photography", "high-end social media marketing imagery", "lifestyle brand photography"
+    
+    FULL EXAMPLE of EXCELLENT visualPrompt for Nike:
+    "Close-up product shot of Nike Air Max 270 sneakers in black and white colorway, positioned on a ${profile.colors[0]} geometric platform with ${profile.colors[1]} accent lighting behind. Minimalist studio composition with dramatic shadows. Professional athletic footwear product photography with high-end social media marketing quality."
+    
+    EXAMPLES of BAD visualPrompts (NEVER DO THIS):
+    ❌ "A nice image of our product" - TOO VAGUE
+    ❌ "Shoes in a desert" - WRONG CONTEXT
+    ❌ "Athletic scene" - NOT SPECIFIC ENOUGH
+    ❌ "A beautiful composition" - NO PRODUCT MENTIONED
+    
+    LENGTH REQUIREMENT: Each visualPrompt must be 40-60 words with ALL 6 steps.
+    
+    VERIFICATION CHECKLIST (AI must check before returning):
+    □ Does visualPrompt mention a specific product name from offerings?
+    □ Does it include composition type?
+    □ Does it mention exact brand colors?
+    □ Does it specify lighting/mood?
+    □ Does it match the brand's visual style?
+    □ Is it 40-60 words long?
 
-    Return a JSON array of posts.
+    Return a JSON array of posts. Every visualPrompt must pass the checklist above.
   `;
 
   try {
