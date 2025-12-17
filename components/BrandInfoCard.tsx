@@ -169,8 +169,12 @@ const BrandInfoCard: React.FC<BrandInfoCardProps> = ({
           className="lg:hidden w-full flex items-center justify-between mb-4 pb-4 border-b border-gray-800"
         >
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-              <Building2 className="text-indigo-400" size={20} />
+            <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20 w-12 h-12 flex items-center justify-center overflow-hidden">
+              {profile.logoUrl ? (
+                <img src={profile.logoUrl} alt={`${profile.name} logo`} className="w-full h-full object-contain" />
+              ) : (
+                <Building2 className="text-indigo-400" size={20} />
+              )}
             </div>
             <div className="text-left">
               <h2 className="font-bold text-white">{profile.name}</h2>
@@ -188,8 +192,12 @@ const BrandInfoCard: React.FC<BrandInfoCardProps> = ({
             
             {/* Header (Desktop) */}
             <div className="hidden lg:flex items-center gap-3">
-              <div className="p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-                <Building2 className="text-indigo-400" size={24} />
+              <div className="p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20 w-16 h-16 flex items-center justify-center overflow-hidden">
+                {profile.logoUrl ? (
+                  <img src={profile.logoUrl} alt={`${profile.name} logo`} className="w-full h-full object-contain" />
+                ) : (
+                  <Building2 className="text-indigo-400" size={24} />
+                )}
               </div>
               <div className="flex-1">
                 {isEditing ? (

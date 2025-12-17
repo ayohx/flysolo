@@ -11,6 +11,7 @@ export interface BrandProfile {
   visualStyle: string; // Art direction
   essence?: string; // One-line summary of what the business does
   confidence?: number; // 0-100 score on data quality
+  logoUrl?: string; // URL to official company logo
 }
 
 export interface SocialPost {

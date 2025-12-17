@@ -146,6 +146,7 @@ const normaliseBrandProfile = (profile: BrandProfile): BrandProfile => {
     services: safeServices,
     strategy: safeStrategy,
     essence: (profile.essence || '').trim() || profile.name,
+    logoUrl: profile.logoUrl,
   };
 };
 
@@ -333,6 +334,7 @@ const enrichBrandProfile = async (
       strategy: { type: Type.STRING },
       essence: { type: Type.STRING },
       confidence: { type: Type.NUMBER },
+      logoUrl: { type: Type.STRING },
     },
     required: ["services", "strategy"],
   };
@@ -393,6 +395,7 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
       },
       essence: { type: Type.STRING, description: "One sentence summary of what this business does" },
       confidence: { type: Type.NUMBER, description: "Confidence score 0-100 on data quality" },
+      logoUrl: { type: Type.STRING, description: "URL to the official company logo (transparent PNG preferred)" },
     },
     required: ["name", "industry", "products", "services", "socialHandles", "colors", "vibe", "visualStyle", "competitors", "strategy", "essence", "confidence"],
   };
@@ -405,7 +408,12 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
     
     CRITICAL DATA REQUIREMENTS:
     
-    1. SERVICES/PRODUCTS (MINIMUM 10 ITEMS - THIS IS MANDATORY):
+    1. LOGO URL:
+       - Find the official company logo URL.
+       - Prefer transparent PNG or SVG if available.
+       - Look for: 'link[rel="icon"]', 'meta[property="og:image"]', or scrape the logo from the homepage.
+    
+    2. SERVICES/PRODUCTS (MINIMUM 10 ITEMS - THIS IS MANDATORY):
        - Find SPECIFIC product names, service offerings, or packages
        - DO NOT use generic categories like "footwear", "services", "products"
        - BE SPECIFIC: exact names, model numbers, package titles
@@ -562,22 +570,23 @@ export const mergeSourceUrl = async (currentProfile: BrandProfile, newUrl: strin
     `;
   
     const schema: Schema = {
-      type: Type.OBJECT,
-      properties: {
-        name: { type: Type.STRING },
-        industry: { type: Type.STRING },
-        products: { type: Type.STRING },
-        services: { type: Type.ARRAY, items: { type: Type.STRING } },
-        socialHandles: { type: Type.ARRAY, items: { type: Type.STRING } },
-        colors: { type: Type.ARRAY, items: { type: Type.STRING } },
-        vibe: { type: Type.STRING },
-        visualStyle: { type: Type.STRING },
-        competitors: { type: Type.ARRAY, items: { type: Type.STRING } },
-        strategy: { type: Type.STRING },
-        essence: { type: Type.STRING },
-        confidence: { type: Type.NUMBER },
-      },
-      required: ["name", "industry", "products", "services", "colors", "vibe", "visualStyle", "competitors", "strategy"]
+             type: Type.OBJECT,
+             properties: {
+                name: { type: Type.STRING },
+                industry: { type: Type.STRING },
+                products: { type: Type.STRING },
+                services: { type: Type.ARRAY, items: { type: Type.STRING } },
+                socialHandles: { type: Type.ARRAY, items: { type: Type.STRING } },
+                colors: { type: Type.ARRAY, items: { type: Type.STRING } },
+                vibe: { type: Type.STRING },
+                visualStyle: { type: Type.STRING },
+                competitors: { type: Type.ARRAY, items: { type: Type.STRING } },
+                strategy: { type: Type.STRING },
+                essence: { type: Type.STRING },
+                confidence: { type: Type.NUMBER },
+        logoUrl: { type: Type.STRING },
+             },
+             required: ["name", "industry", "products", "services", "colors", "vibe", "visualStyle", "competitors", "strategy"]
     };
 
     try {
@@ -826,21 +835,21 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
       try {
         const response = await client.models.generateImages({
           model,
-          prompt: finalPrompt,
-          config: {
-            numberOfImages: 1,
-            aspectRatio: aspectRatio === "9:16" ? "9:16" : aspectRatio === "16:9" ? "16:9" : "1:1",
-          },
-        });
+      prompt: finalPrompt,
+      config: {
+        numberOfImages: 1,
+        aspectRatio: aspectRatio === "9:16" ? "9:16" : aspectRatio === "16:9" ? "16:9" : "1:1",
+      },
+    });
 
-        if (response.generatedImages && response.generatedImages.length > 0) {
-          const imageData = response.generatedImages[0].image?.imageBytes;
-          if (imageData) {
+    if (response.generatedImages && response.generatedImages.length > 0) {
+      const imageData = response.generatedImages[0].image?.imageBytes;
+      if (imageData) {
             console.log(`✅ Imagen model succeeded: ${model}`);
-            return `data:image/png;base64,${imageData}`;
-          }
-        }
-
+        return `data:image/png;base64,${imageData}`;
+      }
+    }
+    
         console.warn(`⚠️ Imagen model returned no images: ${model}`);
       } catch (err: any) {
         lastError = err;
