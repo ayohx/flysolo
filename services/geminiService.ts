@@ -561,10 +561,22 @@ export const generatePostVideo = async (
   // Sanitise the prompt to avoid RAI filters for people/faces
   const sanitisedPrompt = sanitisePromptForVideo(visualPrompt);
   
-  // For IMAGE-TO-VIDEO: Prompt should ONLY describe motion/animation
-  // Do NOT re-describe the image content - the image provides the visuals
-  // Keep it short and focused on movement
-  const imageToVideoPrompt = `${sanitisedPrompt}. Smooth cinematic motion. Keep faithful to source image.`;
+  // For IMAGE-TO-VIDEO: Prompt describes ONLY motion/animation, NOT content
+  // VEO's RAI filter rejects prompts mentioning people, so use abstract motion descriptions
+  // The image itself provides the visual content - we just describe HOW to animate it
+  const safeMotionPrompts = [
+    "Gentle parallax effect with soft depth of field",
+    "Slow cinematic zoom with smooth camera movement",
+    "Subtle atmospheric motion with natural flow",
+    "Slow pan across the scene with professional lighting",
+    "Smooth dolly zoom with elegant motion blur",
+  ];
+  const randomMotion = safeMotionPrompts[Math.floor(Math.random() * safeMotionPrompts.length)];
+  
+  // Combine user's motion intent with safe motion - avoid triggering RAI
+  const imageToVideoPrompt = sanitisedPrompt.length > 0 
+    ? `${randomMotion}. ${sanitisedPrompt}. Keep faithful to source image.`
+    : `${randomMotion}. Keep faithful to source image.`;
 
   // Check if we're running on Netlify (production) - use serverless function for CORS-free API calls
   const isNetlify = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
@@ -671,13 +683,17 @@ export const generatePostVideo = async (
       console.log("🎬 IMAGE-TO-VIDEO mode - animating source image...");
       console.log("📝 Motion prompt:", imageToVideoPrompt);
       
-      // VEO 2.0 image-to-video - using the correct API structure
-      // Based on Google Cloud Vertex AI documentation
+      // Use REST API directly for image-to-video (SDK doesn't support it!)
+      // Google AI Studio REST endpoint for VEO image-to-video
+      const veoApiKey = process.env.VEO_API_KEY || process.env.API_KEY;
+      const veoEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:generateVideo?key=${veoApiKey}`;
+      
       const requestBody = {
         instances: [{
           prompt: imageToVideoPrompt,
           image: {
             bytesBase64Encoded: imageBase64,
+            mimeType: mimeType,
           },
         }],
         parameters: {
@@ -688,36 +704,29 @@ export const generatePostVideo = async (
         },
       };
       
-      console.log("📤 Attempting image-to-video via SDK...");
+      console.log("📤 Attempting image-to-video via REST API...");
       
-      // Try using the SDK's generateVideos with image parameter
-      // Note: If SDK doesn't support image, we fall back to text-to-video with the user's motion prompt
       try {
-        const response = await client.models.generateVideos({
-          model: "veo-2.0-generate-001",
-          prompt: imageToVideoPrompt,
-          // @ts-ignore - SDK may support image in newer versions
-          image: {
-            inlineData: {
-              data: imageBase64,
-              mimeType: mimeType,
-            },
-          },
-          config: {
-            aspectRatio: "9:16",
-            numberOfVideos: 1,
-            durationSeconds: duration === "5s" ? 5 : 10,
-            personGeneration: "dont_allow",
-          },
+        const response = await fetch(veoEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
         });
-        console.log("✅ Image-to-video request accepted via SDK:", response);
-        return response as any;
-      } catch (sdkError: any) {
-        console.warn("⚠️ SDK image-to-video failed, falling back to text-to-video with motion prompt...", sdkError.message);
         
-        // Fall back to text-to-video but use the user's motion prompt
-        // This is better than the old behaviour of using a generic prompt
-        console.log("🔄 Using text-to-video with user's motion prompt:", imageToVideoPrompt);
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.warn("⚠️ REST API image-to-video failed:", response.status, errorText);
+          throw new Error(`REST API failed: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log("✅ Image-to-video request accepted via REST API:", result);
+        return result;
+      } catch (restError: any) {
+        console.warn("⚠️ REST API image-to-video failed, falling back to text-to-video...", restError.message);
+        
+        // Fall back to SDK text-to-video with safe motion prompt
+        console.log("🔄 Using text-to-video fallback with safe motion prompt...");
         const response = await client.models.generateVideos({
           model: "veo-2.0-generate-001",
           prompt: imageToVideoPrompt,

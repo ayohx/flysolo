@@ -51,6 +51,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             prompt: motionPrompt,
             image: {
               bytesBase64Encoded: imageBase64,
+              mimeType: mimeType,
             },
           },
         ],
