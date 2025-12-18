@@ -13,11 +13,13 @@ export default defineConfig(({ mode }) => {
     const IMAGEN_KEY = process.env.VITE_IMAGEN_API_KEY || env.VITE_IMAGEN_API_KEY || env.IMAGEN_API_KEY || GEMINI_KEY;
     const VEO_KEY = process.env.VITE_VEO_API_KEY || env.VITE_VEO_API_KEY || env.VEO_API_KEY || GEMINI_KEY;
     const VEO_KEY_2 = process.env.VITE_VEO_API_KEY_2 || env.VITE_VEO_API_KEY_2 || env.VEO_API_KEY_2 || VEO_KEY;
+    const PEXELS_KEY = process.env.VITE_PEXELS_API_KEY || env.VITE_PEXELS_API_KEY || '';
     
     console.log('🔑 Build-time env check:', {
       hasGemini: !!GEMINI_KEY,
       hasImagen: !!IMAGEN_KEY,
       hasVeo: !!VEO_KEY,
+      hasPexels: !!PEXELS_KEY,
     });
     
     return {
@@ -31,6 +33,7 @@ export default defineConfig(({ mode }) => {
         'process.env.IMAGEN_API_KEY': JSON.stringify(IMAGEN_KEY),
         'process.env.VEO_API_KEY': JSON.stringify(VEO_KEY),
         'process.env.VEO_API_KEY_2': JSON.stringify(VEO_KEY_2),
+        'process.env.PEXELS_API_KEY': JSON.stringify(PEXELS_KEY),
       },
       resolve: {
         alias: {

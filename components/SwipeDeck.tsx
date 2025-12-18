@@ -3,6 +3,7 @@ import { SocialPost, BrandProfile } from '../types';
 import { X, Check, Edit2, RefreshCw, PlusCircle, Layers, ImageIcon, Menu, ChevronLeft, Film, Play, Loader2, Calendar } from 'lucide-react';
 import BrandInfoCard from './BrandInfoCard';
 import LikedAssetsPanel from './LikedAssetsPanel';
+import { StoredBrand } from '../services/supabaseService';
 
 interface SwipeDeckProps {
   posts: SocialPost[];
@@ -23,11 +24,17 @@ interface SwipeDeckProps {
   loadingImages: Set<string>;
   isMerging: boolean;
   isGeneratingMore: boolean;
+  // Multi-brand support
+  allBrands?: StoredBrand[];
+  currentBrandId?: string | null;
+  onSwitchBrand?: (brandId: string) => void;
+  onBackToBrands?: () => void;
 }
 
 const SwipeDeck: React.FC<SwipeDeckProps> = ({ 
     posts, brandProfile, likedPosts, onLike, onReject, onEdit, onEmpty, onFetchMore, 
-    onUpdateProfile, onAddSource, onCustomCreate, onStartFresh, onDeletePost, onSchedulePost, onCalendar, loadingImages, isMerging, isGeneratingMore 
+    onUpdateProfile, onAddSource, onCustomCreate, onStartFresh, onDeletePost, onSchedulePost, onCalendar, loadingImages, isMerging, isGeneratingMore,
+    allBrands = [], currentBrandId, onSwitchBrand, onBackToBrands
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [direction, setDirection] = useState<'left' | 'right' | null>(null);
@@ -386,6 +393,10 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
           onUpdate={onUpdateProfile} 
           onAddSource={onAddSource} 
           isMerging={isMerging}
+          allBrands={allBrands}
+          currentBrandId={currentBrandId}
+          onSwitchBrand={onSwitchBrand}
+          onBackToBrands={onBackToBrands}
         />
       </div>
 

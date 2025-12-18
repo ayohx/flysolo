@@ -740,6 +740,17 @@ define: {
 
 ## 📝 Changelog
 
+### v0.8.0 (18 December 2025) - Brand Workspace & Smart Images
+- ✨ **Brand Workspace**: Save and switch between multiple brand profiles
+- ✨ **Brand Selector Landing Page**: Beautiful card grid for brand management
+- ✨ **Hard/Soft Refresh**: Re-analyse brands or background enrich data
+- ✨ **Multi-API Key Rotation**: Iterate through 4 Google API keys for Imagen
+- ✨ **Pexels Smart Fallback**: Industry-aware image search when AI fails
+- 🐛 **Off-Brand Images Fix**: Pexels now uses industry context to prevent wrong images (no more cosmetics for digital agencies!)
+- 🐛 **Brand Switch Bug**: Fixed stale state when switching between brands
+- 🔧 **Supabase Integration**: Persistent storage for brands, assets, and posts
+- 📝 Updated BMAD documentation
+
 ### v0.7.2 (17 December 2025) - Stability Patch
 - 🐛 **Analysis Tool Fix**: Solved `INVALID_ARGUMENT` error by splitting research (tools) and extraction (JSON) into separate API calls.
 - ✨ **Robust Image Fallback**: Added multi-model retry chain for Imagen and a **branded placeholder** fallback (SVG with brand colors) to prevent blank/random images.
@@ -843,4 +854,4 @@ define: {
 
 ---
 
-*Last Updated: 17 December 2025 - v0.7.2 Stability Patch*
+*Last Updated: 18 December 2025 - v0.8.0 Brand Workspace & Smart Images*

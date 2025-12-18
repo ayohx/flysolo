@@ -6,8 +6,9 @@ import SwipeDeck from './components/SwipeDeck';
 import Editor from './components/Editor';
 import Dashboard from './components/Dashboard';
 import CalendarPage from './components/CalendarPage';
-import { analyzeBrand, generateContentIdeas, generatePostImage, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys } from './services/geminiService';
-import { saveBrand, saveBrandAssets, getBrandByUrl, findRelevantAsset, checkDatabaseSetup } from './services/supabaseService';
+import BrandSelector from './components/BrandSelector';
+import { analyzeBrand, generateContentIdeas, generatePostImage, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand } from './services/geminiService';
+import { saveBrand, saveBrandAssets, getBrandByUrl, findRelevantAsset, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
 import { Plus, X } from 'lucide-react';
 
 // LocalStorage keys
@@ -115,12 +116,25 @@ function App() {
   const [customCreateMode, setCustomCreateMode] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
   const [currentBrandId, setCurrentBrandId] = useState<string | null>(null); // Supabase brand ID
+  const [allBrands, setAllBrands] = useState<StoredBrand[]>([]); // All saved brands for switcher
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Check Supabase on mount
+  // Check Supabase on mount and load brands
   useEffect(() => {
-    checkDatabaseSetup().then(status => {
+    const initApp = async () => {
+      const status = await checkDatabaseSetup();
       console.log('🗄️ Supabase status:', status);
-    });
+      
+      // Load all brands for the selector
+      const brands = await listBrands();
+      setAllBrands(brands);
+      
+      // If we have saved brands and no local session, show brand selector
+      if (brands.length > 0 && !brandProfile && appState === AppState.ONBOARDING) {
+        setAppState(AppState.BRAND_SELECTOR);
+      }
+    };
+    initApp();
   }, []);
   
   // Analysis State
@@ -220,8 +234,10 @@ function App() {
     }
   };
 
-  const startImageGeneration = async (postsToGen: SocialPost[], profile: BrandProfile) => {
+  const startImageGeneration = async (postsToGen: SocialPost[], profile: BrandProfile, overrideBrandId?: string | null) => {
     const MAX_RETRIES = 3;
+    // Use override brandId if provided, otherwise fall back to state (may be stale during brand switch)
+    const activeBrandId = overrideBrandId !== undefined ? overrideBrandId : currentBrandId;
     
     postsToGen.forEach(async (post) => {
       if (post.imageUrl || loadingImages.has(post.id)) return;
@@ -232,11 +248,11 @@ function App() {
       let retries = 0;
       
       // PRIORITY 1: Check Supabase for real product images
-      if (currentBrandId) {
+      if (activeBrandId) {
         try {
           // Extract product name from caption/visual prompt for matching
           const searchTerm = post.caption.split(' ').slice(0, 5).join(' ');
-          const realAsset = await findRelevantAsset(currentBrandId, searchTerm);
+          const realAsset = await findRelevantAsset(activeBrandId, searchTerm);
           
           if (realAsset && realAsset.url) {
             console.log(`🎯 Using REAL product image for post ${post.id}:`, realAsset.label);
@@ -534,6 +550,106 @@ function App() {
     setAppState(AppState.DASHBOARD);
   };
 
+  // Brand Selector handlers
+  const handleSelectBrand = async (brand: StoredBrand) => {
+    console.log('📦 Loading brand workspace:', brand.name);
+    
+    // Load workspace from Supabase
+    const workspace = await loadBrandWorkspace(brand.id);
+    if (!workspace) {
+      console.error('Failed to load brand workspace');
+      return;
+    }
+    
+    // Set brand profile from stored data
+    setBrandProfile(workspace.brand.profile_json);
+    setCurrentBrandId(brand.id);
+    
+    // Load saved posts
+    const likedFromDb = workspace.posts.map(p => ({
+      ...p.post_json,
+      status: 'liked' as const,
+    }));
+    setLikedPosts(likedFromDb);
+    
+    // Generate fresh content for the deck
+    const freshPosts = await generateContentIdeas(workspace.brand.profile_json, 10);
+    setGeneratedPosts(freshPosts);
+    
+    // Start image generation with explicit brand ID to avoid stale state
+    startImageGeneration(freshPosts.slice(0, 5), workspace.brand.profile_json, brand.id);
+    
+    setAppState(AppState.SWIPING);
+  };
+
+  const handleNewBrand = () => {
+    // Clear current brand and go to onboarding
+    setBrandProfile(null);
+    setGeneratedPosts([]);
+    setLikedPosts([]);
+    setCurrentBrandId(null);
+    resetAnalysisStages();
+    setAppState(AppState.ONBOARDING);
+  };
+
+  const handleHardRefresh = async (brand: StoredBrand) => {
+    console.log('🔄 Hard refresh for:', brand.name);
+    // Clear posts but keep the brand context
+    setGeneratedPosts([]);
+    // Keep liked posts - they're the user's work
+    
+    // Re-analyze the brand from scratch
+    setAppState(AppState.ANALYZING);
+    resetAnalysisStages();
+    
+    // Trigger fresh analysis using the stored URL
+    await handleStartAnalysis(brand.url.startsWith('http') ? brand.url : `https://${brand.url}`);
+  };
+
+  const handleSoftRefresh = async (brand: StoredBrand) => {
+    console.log('🔄 Soft refresh for:', brand.name);
+    setIsRefreshing(true);
+    
+    try {
+      const result = await softRefreshBrand(
+        brand.profile_json, 
+        brand.url.startsWith('http') ? brand.url : `https://${brand.url}`
+      );
+      
+      if (result.changes.length > 0) {
+        // Update the brand in Supabase
+        await saveBrand(brand.url, result.updatedProfile);
+        
+        // Refresh the brands list
+        const updatedBrands = await listBrands();
+        setAllBrands(updatedBrands);
+        
+        // Show what changed
+        alert(`Refresh complete!\n\n${result.changes.join('\n')}`);
+      } else {
+        alert('No new information found. Your brand profile is up to date!');
+      }
+    } catch (error) {
+      console.error('Soft refresh failed:', error);
+      alert('Refresh failed. Please try again.');
+    }
+    
+    setIsRefreshing(false);
+  };
+
+  // Brand switching from sidebar
+  const handleSwitchBrand = async (brandId: string) => {
+    const brand = allBrands.find(b => b.id === brandId);
+    if (brand) {
+      await handleSelectBrand(brand);
+    }
+  };
+
+  // Navigate back to brand selector
+  const handleBackToBrands = () => {
+    setAppState(AppState.BRAND_SELECTOR);
+  };
+
   // Show configuration error if API keys are missing
   if (!apiConfigured) {
     const missingKeys = getMissingApiKeys();
@@ -572,6 +688,15 @@ function App() {
 
   // Render Logic
   switch (appState) {
+    case AppState.BRAND_SELECTOR:
+      return (
+        <BrandSelector
+          onSelectBrand={handleSelectBrand}
+          onNewBrand={handleNewBrand}
+          onHardRefresh={handleHardRefresh}
+          onSoftRefresh={handleSoftRefresh}
+        />
+      );
     case AppState.ONBOARDING:
       return <Onboarding onStart={handleStartAnalysis} errorMessage={analysisError} />;
     case AppState.ANALYZING:
@@ -608,6 +733,10 @@ function App() {
                     loadingImages={loadingImages}
                     isMerging={isMerging}
                     isGeneratingMore={isGeneratingMore}
+                    allBrands={allBrands}
+                    currentBrandId={currentBrandId}
+                    onSwitchBrand={handleSwitchBrand}
+                    onBackToBrands={handleBackToBrands}
                 />
             )}
 

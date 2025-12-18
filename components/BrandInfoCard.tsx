@@ -1,9 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import { BrandProfile } from '../types';
+import { StoredBrand } from '../services/supabaseService';
 import { 
   Building2, Palette, Globe, Tag, Sparkles, Save, Plus, Link, Loader2, 
   Instagram, Linkedin, Twitter, AtSign, CheckCircle2, Youtube, Facebook,
-  ChevronDown, ChevronUp, X, Music2, Globe2, Pencil, Image as ImageIcon
+  ChevronDown, ChevronUp, X, Music2, Globe2, Pencil, Image as ImageIcon,
+  FolderOpen, ArrowLeftRight
 } from 'lucide-react';
 
 interface BrandInfoCardProps {
@@ -13,6 +15,11 @@ interface BrandInfoCardProps {
   isMerging: boolean;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  // Multi-brand support
+  allBrands?: StoredBrand[];
+  currentBrandId?: string | null;
+  onSwitchBrand?: (brandId: string) => void;
+  onBackToBrands?: () => void;
 }
 
 // Platform detection with icons and names
@@ -54,11 +61,13 @@ const formatHandle = (handle: string) => {
 };
 
 const BrandInfoCard: React.FC<BrandInfoCardProps> = ({ 
-  profile, onUpdate, onAddSource, isMerging, isCollapsed = false, onToggleCollapse 
+  profile, onUpdate, onAddSource, isMerging, isCollapsed = false, onToggleCollapse,
+  allBrands = [], currentBrandId, onSwitchBrand, onBackToBrands
 }) => {
   const [newSourceUrl, setNewSourceUrl] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState<BrandProfile>(profile);
+  const [showBrandSwitcher, setShowBrandSwitcher] = useState(false);
   
   // New social/colour add states
   const [showAddSocial, setShowAddSocial] = useState(false);
@@ -190,6 +199,64 @@ const BrandInfoCard: React.FC<BrandInfoCardProps> = ({
         <>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-5">
             
+            {/* Brand Switcher (if multiple brands exist) */}
+            {allBrands.length > 1 && onSwitchBrand && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowBrandSwitcher(!showBrandSwitcher)}
+                  className="w-full flex items-center justify-between px-3 py-2 bg-gray-800/50 hover:bg-gray-800 rounded-lg border border-gray-700 text-sm transition-colors"
+                >
+                  <span className="flex items-center gap-2 text-gray-400">
+                    <ArrowLeftRight size={14} />
+                    Switch Brand
+                  </span>
+                  <ChevronDown size={14} className={`text-gray-500 transition-transform ${showBrandSwitcher ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {showBrandSwitcher && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 max-h-60 overflow-y-auto">
+                    {onBackToBrands && (
+                      <button
+                        onClick={() => {
+                          setShowBrandSwitcher(false);
+                          onBackToBrands();
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-indigo-400 hover:bg-gray-800 transition-colors border-b border-gray-800"
+                      >
+                        <FolderOpen size={14} />
+                        View All Brands
+                      </button>
+                    )}
+                    {allBrands.filter(b => b.id !== currentBrandId).map(brand => (
+                      <button
+                        key={brand.id}
+                        onClick={() => {
+                          setShowBrandSwitcher(false);
+                          onSwitchBrand(brand.id);
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 transition-colors"
+                      >
+                        <div 
+                          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                          style={{ backgroundColor: `${brand.profile_json?.colors?.[0] || '#6366f1'}20` }}
+                        >
+                          {brand.logo_url ? (
+                            <img src={brand.logo_url} alt={brand.name} className="w-full h-full object-contain rounded-lg" />
+                          ) : (
+                            <Building2 size={14} style={{ color: brand.profile_json?.colors?.[0] || '#6366f1' }} />
+                          )}
+                        </div>
+                        <div className="flex-1 text-left">
+                          <div className="font-medium">{brand.name}</div>
+                          <div className="text-xs text-gray-500">{brand.industry}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Header (Desktop) */}
             <div className="hidden lg:flex items-center gap-3">
               <div className="p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20 w-16 h-16 flex items-center justify-center overflow-hidden">

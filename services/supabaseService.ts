@@ -386,6 +386,100 @@ export const updatePostSchedule = async (postId: string, scheduledDate: string):
 // DATABASE SCHEMA CREATION (Run once on first setup)
 // ============================================================================
 
+// ============================================================================
+// WORKSPACE OPERATIONS (Multi-Brand Support)
+// ============================================================================
+
+/**
+ * Load complete workspace for a brand (profile + posts + assets)
+ * Used when switching between brands
+ */
+export const loadBrandWorkspace = async (brandId: string): Promise<{
+  brand: StoredBrand;
+  posts: SavedPost[];
+  assets: BrandAsset[];
+} | null> => {
+  const client = getSupabase();
+  
+  try {
+    // Fetch brand
+    const { data: brand, error: brandError } = await client
+      .from('brands')
+      .select('*')
+      .eq('id', brandId)
+      .single();
+    
+    if (brandError || !brand) {
+      console.error('Failed to load brand:', brandError);
+      return null;
+    }
+    
+    // Fetch posts and assets in parallel
+    const [postsResult, assetsResult] = await Promise.all([
+      client.from('saved_posts').select('*').eq('brand_id', brandId).order('created_at', { ascending: false }),
+      client.from('brand_assets').select('*').eq('brand_id', brandId).order('created_at', { ascending: false }),
+    ]);
+    
+    const posts = (postsResult.data || []) as SavedPost[];
+    const assets = (assetsResult.data || []) as BrandAsset[];
+    
+    console.log(`📦 Loaded workspace for ${brand.name}: ${posts.length} posts, ${assets.length} assets`);
+    
+    return {
+      brand: brand as StoredBrand,
+      posts,
+      assets,
+    };
+  } catch (e) {
+    console.error('Workspace load error:', e);
+    return null;
+  }
+};
+
+/**
+ * Get count of saved posts for a brand
+ */
+export const getBrandPostCount = async (brandId: string): Promise<number> => {
+  const client = getSupabase();
+  
+  try {
+    const { count, error } = await client
+      .from('saved_posts')
+      .select('*', { count: 'exact', head: true })
+      .eq('brand_id', brandId);
+    
+    if (error) return 0;
+    return count || 0;
+  } catch (e) {
+    return 0;
+  }
+};
+
+/**
+ * Delete a brand and all associated data (cascading delete)
+ */
+export const deleteBrand = async (brandId: string): Promise<boolean> => {
+  const client = getSupabase();
+  
+  try {
+    const { error } = await client
+      .from('brands')
+      .delete()
+      .eq('id', brandId);
+    
+    if (error) {
+      console.error('Failed to delete brand:', error);
+      return false;
+    }
+    
+    console.log('✅ Brand deleted:', brandId);
+    return true;
+  } catch (e) {
+    console.error('Brand delete error:', e);
+    return false;
+  }
+};
+
 /**
  * SQL to create the required tables.
  * Run this in the Supabase SQL editor if tables don't exist.

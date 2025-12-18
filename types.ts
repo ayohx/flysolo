@@ -32,6 +32,7 @@ export interface SocialPost {
 }
 
 export enum AppState {
+  BRAND_SELECTOR = 'BRAND_SELECTOR',  // Landing page showing all saved brands
   ONBOARDING = 'ONBOARDING',
   ANALYZING = 'ANALYZING',
   SWIPING = 'SWIPING',

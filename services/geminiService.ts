@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { BrandProfile, SocialPost } from "../types";
+import { searchPexelsImage, isPexelsConfigured } from "./pexelsService";
 
 /**
  * Check if API keys are configured
@@ -807,6 +808,15 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
 
 /**
  * Generates an image for a specific post using Imagen 3 model.
+ * 
+ * MULTI-KEY FALLBACK CHAIN:
+ * 1. Try Imagen 3 with API_KEY
+ * 2. Try Imagen 3 with IMAGEN_API_KEY
+ * 3. Try Imagen 3 with VEO_API_KEY
+ * 4. Try Imagen 3 with VEO_API_KEY_2
+ * 5. Fallback to Pexels stock images
+ * 6. Ultimate fallback: branded placeholder
+ * 
  * CRITICAL: This uses ENHANCED prompt engineering to ensure brand DNA is respected.
  */
 export const generatePostImage = async (visualPrompt: string, profile: BrandProfile, aspectRatio: string = "1:1"): Promise<string | undefined> => {
@@ -840,49 +850,96 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
     - Photorealistic quality
   `;
 
-  try {
-    const client = getImageClient();
-    const modelCandidates = [
-      // Try multiple model IDs to survive upstream naming/version changes
-      "imagen-3.0-generate-001",
-      "imagen-3.0-fast-generate-001",
-      "imagen-2.0-generate-001",
-    ];
+  // Collect ALL available API keys (using existing env vars)
+  // Remove duplicates and empty values
+  const allApiKeys = [
+    process.env.API_KEY,
+    process.env.IMAGEN_API_KEY,
+    process.env.VEO_API_KEY,
+    process.env.VEO_API_KEY_2,
+  ];
+  
+  const uniqueApiKeys = allApiKeys.filter((key, index, arr) => {
+    return key && key.length > 0 && arr.indexOf(key) === index;
+  }) as string[];
 
-    let lastError: any = null;
-    for (const model of modelCandidates) {
-      try {
-        const response = await client.models.generateImages({
-          model,
-          prompt: finalPrompt,
-          config: {
-            numberOfImages: 1,
-            aspectRatio: aspectRatio === "9:16" ? "9:16" : aspectRatio === "16:9" ? "16:9" : "1:1",
-          },
-        });
+  console.log(`🖼️ Attempting image generation with ${uniqueApiKeys.length} API keys...`);
 
-        if (response.generatedImages && response.generatedImages.length > 0) {
-          const imageData = response.generatedImages[0].image?.imageBytes;
-          if (imageData) {
-            console.log(`✅ Imagen model succeeded: ${model}`);
-            return `data:image/png;base64,${imageData}`;
+  // Imagen model candidates to try with each key
+  const modelCandidates = [
+    "imagen-3.0-generate-001",
+    "imagen-3.0-fast-generate-001",
+    "imagen-2.0-generate-001",
+  ];
+
+  let lastError: any = null;
+  let attemptCount = 0;
+
+  // Try each API key
+  for (let keyIndex = 0; keyIndex < uniqueApiKeys.length; keyIndex++) {
+    const apiKey = uniqueApiKeys[keyIndex];
+    console.log(`🔑 Trying API key ${keyIndex + 1}/${uniqueApiKeys.length}...`);
+    
+    try {
+      const client = new GoogleGenAI({ apiKey });
+      
+      // Try each model with this API key
+      for (const model of modelCandidates) {
+        attemptCount++;
+        try {
+          const response = await client.models.generateImages({
+            model,
+            prompt: finalPrompt,
+            config: {
+              numberOfImages: 1,
+              aspectRatio: aspectRatio === "9:16" ? "9:16" : aspectRatio === "16:9" ? "16:9" : "1:1",
+            },
+          });
+
+          if (response.generatedImages && response.generatedImages.length > 0) {
+            const imageData = response.generatedImages[0].image?.imageBytes;
+            if (imageData) {
+              console.log(`✅ Image generated successfully with key ${keyIndex + 1}, model: ${model}`);
+              return `data:image/png;base64,${imageData}`;
+            }
           }
+
+          console.warn(`⚠️ Key ${keyIndex + 1}, model ${model}: No images returned`);
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`⚠️ Key ${keyIndex + 1}, model ${model} failed:`, err?.message || err);
+          continue;
         }
-
-        console.warn(`⚠️ Imagen model returned no images: ${model}`);
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`⚠️ Imagen model failed (${model})`, err?.message || err);
-        continue;
       }
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`⚠️ API key ${keyIndex + 1} initialization failed:`, err?.message || err);
+      continue;
     }
-
-    console.error("❌ All Imagen models failed; using branded placeholder", lastError?.message || lastError);
-    return getBrandedPlaceholderImage(safeProfile, visualPrompt);
-  } catch (error) {
-    console.error("Image generation failed:", error);
-    return getBrandedPlaceholderImage(safeProfile, visualPrompt);
   }
+
+  // All Imagen keys failed - try Pexels
+  console.log(`🔄 All ${attemptCount} Imagen attempts failed, trying Pexels...`);
+  
+  if (isPexelsConfigured()) {
+    try {
+      const pexelsOrientation = aspectRatio === "9:16" ? 'portrait' : aspectRatio === "16:9" ? 'landscape' : 'square';
+      const pexelsImage = await searchPexelsImage(safeProfile, visualPrompt, pexelsOrientation);
+      
+      if (pexelsImage) {
+        console.log(`✅ Pexels image found as fallback`);
+        return pexelsImage;
+      }
+    } catch (pexelsError) {
+      console.warn('⚠️ Pexels fallback failed:', pexelsError);
+    }
+  } else {
+    console.log('⚠️ Pexels not configured, skipping fallback');
+  }
+
+  // Ultimate fallback - branded placeholder
+  console.log('🎨 Using branded placeholder as final fallback');
+  return getBrandedPlaceholderImage(safeProfile, visualPrompt);
 };
 
 /**
@@ -937,6 +994,159 @@ const getBrandedPlaceholderImage = (profile: BrandProfile, seed: string = ''): s
   `.trim();
 
   return `data:image/svg+xml;base64,${toBase64Utf8(svg)}`;
+};
+
+/**
+ * Soft refresh: Enrich an existing brand profile with new data.
+ * Looks for new products, services, or marketing insights without replacing existing data.
+ * 
+ * @param currentProfile - The existing brand profile
+ * @param url - The brand URL to re-analyze
+ * @returns Updated profile and list of changes found
+ */
+export const softRefreshBrand = async (
+  currentProfile: BrandProfile,
+  url: string
+): Promise<{ 
+  updatedProfile: BrandProfile; 
+  newOfferings: string[];
+  changes: string[];
+}> => {
+  console.log("🔄 Soft refresh: Looking for new data for", currentProfile.name);
+  
+  const changes: string[] = [];
+  const newOfferings: string[] = [];
+  
+  try {
+    // Research for new products/services
+    const refreshPrompt = `
+      I already have this brand profile for ${currentProfile.name} (${url}):
+      
+      Current Services: ${currentProfile.services.slice(0, 10).join(', ')}
+      Current Strategy: ${currentProfile.strategy?.substring(0, 200)}...
+      
+      Search for any NEW information about this brand that we might have missed:
+      1. New products or services launched recently
+      2. New marketing campaigns or initiatives
+      3. Updated brand messaging or positioning
+      4. New social media accounts or content strategies
+      5. Recent news or announcements
+      6. New product images or marketing materials
+      
+      Return ONLY new information that is NOT already in the current profile.
+    `;
+    
+    const refreshSchema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        newServices: { 
+          type: Type.ARRAY, 
+          items: { type: Type.STRING },
+          description: "New products/services not in current list"
+        },
+        strategyUpdates: { 
+          type: Type.STRING,
+          description: "Any updates to marketing strategy"
+        },
+        newSocialHandles: { 
+          type: Type.ARRAY, 
+          items: { type: Type.STRING },
+          description: "New social media accounts found"
+        },
+        newImageAssets: { 
+          type: Type.ARRAY, 
+          items: { 
+            type: Type.OBJECT,
+            properties: {
+              url: { type: Type.STRING },
+              label: { type: Type.STRING }
+            }
+          },
+          description: "New product images found"
+        },
+        recentNews: { 
+          type: Type.STRING,
+          description: "Any recent news or announcements"
+        },
+      },
+      required: ["newServices"],
+    };
+    
+    const refreshData = await researchAndExtract<{
+      newServices?: string[];
+      strategyUpdates?: string;
+      newSocialHandles?: string[];
+      newImageAssets?: Array<{ url: string; label: string }>;
+      recentNews?: string;
+    }>(refreshPrompt, refreshSchema);
+    
+    // Merge new data
+    let updatedProfile = { ...currentProfile };
+    
+    // Add new services (deduplicated)
+    if (refreshData.newServices && refreshData.newServices.length > 0) {
+      const existingServicesLower = currentProfile.services.map(s => s.toLowerCase());
+      const trulyNew = refreshData.newServices.filter(
+        s => !existingServicesLower.includes(s.toLowerCase())
+      );
+      
+      if (trulyNew.length > 0) {
+        updatedProfile.services = [...trulyNew, ...currentProfile.services];
+        newOfferings.push(...trulyNew);
+        changes.push(`Found ${trulyNew.length} new offerings`);
+      }
+    }
+    
+    // Add new social handles
+    if (refreshData.newSocialHandles && refreshData.newSocialHandles.length > 0) {
+      const existingHandles = currentProfile.socialHandles || [];
+      const existingHandlesLower = existingHandles.map(h => h.toLowerCase());
+      const newHandles = refreshData.newSocialHandles.filter(
+        h => !existingHandlesLower.includes(h.toLowerCase())
+      );
+      
+      if (newHandles.length > 0) {
+        updatedProfile.socialHandles = [...existingHandles, ...newHandles];
+        changes.push(`Found ${newHandles.length} new social accounts`);
+      }
+    }
+    
+    // Add new image assets
+    if (refreshData.newImageAssets && refreshData.newImageAssets.length > 0) {
+      const existingAssets = currentProfile.imageAssets || [];
+      const existingUrls = existingAssets.map(a => a.url.toLowerCase());
+      const newAssets = refreshData.newImageAssets.filter(
+        a => !existingUrls.includes(a.url.toLowerCase())
+      );
+      
+      if (newAssets.length > 0) {
+        updatedProfile.imageAssets = [...existingAssets, ...newAssets];
+        changes.push(`Found ${newAssets.length} new images`);
+      }
+    }
+    
+    // Append strategy updates if significant
+    if (refreshData.strategyUpdates && refreshData.strategyUpdates.length > 50) {
+      // Don't replace, just log for now
+      changes.push(`New strategy insights found`);
+    }
+    
+    console.log(`✅ Soft refresh complete:`, changes);
+    
+    return {
+      updatedProfile: normaliseBrandProfile(updatedProfile),
+      newOfferings,
+      changes,
+    };
+    
+  } catch (error) {
+    console.error("Soft refresh failed:", error);
+    return {
+      updatedProfile: currentProfile,
+      newOfferings: [],
+      changes: ['Refresh failed - using existing data'],
+    };
+  }
 };
 
 export const refinePost = async (currentPost: SocialPost, instruction: string): Promise<SocialPost> => {
