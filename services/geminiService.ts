@@ -147,6 +147,7 @@ const normaliseBrandProfile = (profile: BrandProfile): BrandProfile => {
     strategy: safeStrategy,
     essence: (profile.essence || '').trim() || profile.name,
     logoUrl: profile.logoUrl,
+    imageAssets: profile.imageAssets || [],
   };
 };
 
@@ -396,6 +397,17 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
       essence: { type: Type.STRING, description: "One sentence summary of what this business does" },
       confidence: { type: Type.NUMBER, description: "Confidence score 0-100 on data quality" },
       logoUrl: { type: Type.STRING, description: "URL to the official company logo (transparent PNG preferred)" },
+      imageAssets: { 
+        type: Type.ARRAY, 
+        items: { 
+          type: Type.OBJECT,
+          properties: {
+            url: { type: Type.STRING },
+            label: { type: Type.STRING }
+          }
+        },
+        description: "List of 5-10 high-quality product or brand image URLs found on the site"
+      }
     },
     required: ["name", "industry", "products", "services", "socialHandles", "colors", "vibe", "visualStyle", "competitors", "strategy", "essence", "confidence"],
   };
@@ -412,8 +424,15 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
        - Find the official company logo URL.
        - Prefer transparent PNG or SVG if available.
        - Look for: 'link[rel="icon"]', 'meta[property="og:image"]', or scrape the logo from the homepage.
+
+    2. IMAGE ASSETS (CRITICAL):
+       - Find 5-10 HIGH-QUALITY image URLs representing their key products or services.
+       - Look for: 'meta[property="og:image"]', product gallery images, hero banner images.
+       - Exclude: tiny icons, social media button images, generic stock photos.
+       - Format: Return valid URLs starting with http/https.
+       - Label each image with what it shows (e.g., "Air Max 270 Black", "Homepage Hero").
     
-    2. SERVICES/PRODUCTS (MINIMUM 10 ITEMS - THIS IS MANDATORY):
+    3. SERVICES/PRODUCTS (MINIMUM 10 ITEMS - THIS IS MANDATORY):
        - Find SPECIFIC product names, service offerings, or packages
        - DO NOT use generic categories like "footwear", "services", "products"
        - BE SPECIFIC: exact names, model numbers, package titles
@@ -436,7 +455,7 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
        - "${url} services offered"
        - "${url} what do they sell"
     
-    2. MARKETING STRATEGY (MINIMUM 100 CHARACTERS - BE DETAILED):
+    4. MARKETING STRATEGY (MINIMUM 100 CHARACTERS - BE DETAILED):
        Must be a substantive paragraph (3-5 sentences) covering:
        
        - WHO: Target audience (demographics, psychographics)
@@ -452,7 +471,7 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
        athletes and everyday fitness journeys. Focus on Instagram and TikTok for younger 
        demographics, emphasizing Just Do It messaging and community building."
     
-    3. VALIDATION BEFORE RETURNING:
+    5. VALIDATION BEFORE RETURNING:
        - Count services: must have ≥10 items
        - Check specificity: no generic words like "products", "services"
        - Strategy length: must be ≥100 characters
@@ -570,23 +589,23 @@ export const mergeSourceUrl = async (currentProfile: BrandProfile, newUrl: strin
     `;
   
     const schema: Schema = {
-             type: Type.OBJECT,
-             properties: {
-                name: { type: Type.STRING },
-                industry: { type: Type.STRING },
-                products: { type: Type.STRING },
-                services: { type: Type.ARRAY, items: { type: Type.STRING } },
-                socialHandles: { type: Type.ARRAY, items: { type: Type.STRING } },
-                colors: { type: Type.ARRAY, items: { type: Type.STRING } },
-                vibe: { type: Type.STRING },
-                visualStyle: { type: Type.STRING },
-                competitors: { type: Type.ARRAY, items: { type: Type.STRING } },
-                strategy: { type: Type.STRING },
-                essence: { type: Type.STRING },
-                confidence: { type: Type.NUMBER },
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING },
+        industry: { type: Type.STRING },
+        products: { type: Type.STRING },
+        services: { type: Type.ARRAY, items: { type: Type.STRING } },
+        socialHandles: { type: Type.ARRAY, items: { type: Type.STRING } },
+        colors: { type: Type.ARRAY, items: { type: Type.STRING } },
+        vibe: { type: Type.STRING },
+        visualStyle: { type: Type.STRING },
+        competitors: { type: Type.ARRAY, items: { type: Type.STRING } },
+        strategy: { type: Type.STRING },
+        essence: { type: Type.STRING },
+        confidence: { type: Type.NUMBER },
         logoUrl: { type: Type.STRING },
-             },
-             required: ["name", "industry", "products", "services", "colors", "vibe", "visualStyle", "competitors", "strategy"]
+      },
+      required: ["name", "industry", "products", "services", "colors", "vibe", "visualStyle", "competitors", "strategy"]
     };
 
     try {
@@ -835,21 +854,21 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
       try {
         const response = await client.models.generateImages({
           model,
-      prompt: finalPrompt,
-      config: {
-        numberOfImages: 1,
-        aspectRatio: aspectRatio === "9:16" ? "9:16" : aspectRatio === "16:9" ? "16:9" : "1:1",
-      },
-    });
+          prompt: finalPrompt,
+          config: {
+            numberOfImages: 1,
+            aspectRatio: aspectRatio === "9:16" ? "9:16" : aspectRatio === "16:9" ? "16:9" : "1:1",
+          },
+        });
 
-    if (response.generatedImages && response.generatedImages.length > 0) {
-      const imageData = response.generatedImages[0].image?.imageBytes;
-      if (imageData) {
+        if (response.generatedImages && response.generatedImages.length > 0) {
+          const imageData = response.generatedImages[0].image?.imageBytes;
+          if (imageData) {
             console.log(`✅ Imagen model succeeded: ${model}`);
-        return `data:image/png;base64,${imageData}`;
-      }
-    }
-    
+            return `data:image/png;base64,${imageData}`;
+          }
+        }
+
         console.warn(`⚠️ Imagen model returned no images: ${model}`);
       } catch (err: any) {
         lastError = err;

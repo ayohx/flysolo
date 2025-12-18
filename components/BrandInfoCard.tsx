@@ -3,7 +3,7 @@ import { BrandProfile } from '../types';
 import { 
   Building2, Palette, Globe, Tag, Sparkles, Save, Plus, Link, Loader2, 
   Instagram, Linkedin, Twitter, AtSign, CheckCircle2, Youtube, Facebook,
-  ChevronDown, ChevronUp, X, Music2, Globe2, Pencil
+  ChevronDown, ChevronUp, X, Music2, Globe2, Pencil, Image as ImageIcon
 } from 'lucide-react';
 
 interface BrandInfoCardProps {

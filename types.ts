@@ -7,11 +7,13 @@ export interface BrandProfile {
   strategy: string;
   products: string; // Broad description
   services: string[]; // Specific list of 5-20 items (e.g. "Bali Tour", "Flight Booking")
+  imageAssets?: Array<{ url: string; label: string }>; // Scraped images mapped to products
   socialHandles?: string[]; // URLs or handles found (Optional)
   visualStyle: string; // Art direction
   essence?: string; // One-line summary of what the business does
   confidence?: number; // 0-100 score on data quality
   logoUrl?: string; // URL to official company logo
+  assets?: string[]; // List of detected product/brand image URLs
 }
 
 export interface SocialPost {

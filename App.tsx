@@ -7,6 +7,7 @@ import Editor from './components/Editor';
 import Dashboard from './components/Dashboard';
 import CalendarPage from './components/CalendarPage';
 import { analyzeBrand, generateContentIdeas, generatePostImage, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys } from './services/geminiService';
+import { saveBrand, saveBrandAssets, getBrandByUrl, findRelevantAsset, checkDatabaseSetup } from './services/supabaseService';
 import { Plus, X } from 'lucide-react';
 
 // LocalStorage keys
@@ -113,6 +114,14 @@ function App() {
   const [isGeneratingMore, setIsGeneratingMore] = useState(false);
   const [customCreateMode, setCustomCreateMode] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
+  const [currentBrandId, setCurrentBrandId] = useState<string | null>(null); // Supabase brand ID
+  
+  // Check Supabase on mount
+  useEffect(() => {
+    checkDatabaseSetup().then(status => {
+      console.log('🗄️ Supabase status:', status);
+    });
+  }, []);
   
   // Analysis State
   const [analysisStages, setAnalysisStages] = useState<AnalysisStage[]>([
@@ -174,7 +183,21 @@ function App() {
       await new Promise(r => setTimeout(r, 800));
       updateStage(3, 'done');
 
-      // 3. Start Image Generation in Background for the first few posts
+      // 4. Save to Supabase (non-blocking)
+      saveBrand(url, profile).then(async (storedBrand) => {
+        if (storedBrand) {
+          setCurrentBrandId(storedBrand.id);
+          console.log('✅ Brand saved to Supabase:', storedBrand.id);
+          
+          // Save discovered image assets
+          if (profile.imageAssets && profile.imageAssets.length > 0) {
+            const assetCount = await saveBrandAssets(storedBrand.id, profile.imageAssets);
+            console.log(`✅ Saved ${assetCount} image assets to Supabase`);
+          }
+        }
+      }).catch(err => console.warn('Supabase save failed (non-critical):', err));
+
+      // 5. Start Image Generation in Background for the first few posts
       // Generate images for first 5 posts immediately to ensure smooth experience
       startImageGeneration(posts.slice(0, 5), profile);
 
@@ -208,30 +231,48 @@ function App() {
       let b64Image: string | undefined;
       let retries = 0;
       
-      // Retry loop to ensure we get an image
-      while (!b64Image && retries < MAX_RETRIES) {
+      // PRIORITY 1: Check Supabase for real product images
+      if (currentBrandId) {
         try {
-          b64Image = await generatePostImage(post.visualPrompt, profile);
+          // Extract product name from caption/visual prompt for matching
+          const searchTerm = post.caption.split(' ').slice(0, 5).join(' ');
+          const realAsset = await findRelevantAsset(currentBrandId, searchTerm);
           
-          // Validate image URL is not empty/undefined
-          if (!b64Image || b64Image === 'undefined') {
-            b64Image = undefined;
-            retries++;
-            console.log(`Image generation attempt ${retries} failed for post ${post.id}, retrying...`);
-            await new Promise(r => setTimeout(r, 1000 * retries)); // Backoff delay
+          if (realAsset && realAsset.url) {
+            console.log(`🎯 Using REAL product image for post ${post.id}:`, realAsset.label);
+            b64Image = realAsset.url;
           }
-        } catch (error) {
-          console.error(`Image generation error for post ${post.id}:`, error);
-          retries++;
-          await new Promise(r => setTimeout(r, 1000 * retries));
+        } catch (e) {
+          console.warn('Asset lookup failed, falling back to AI:', e);
         }
       }
       
-      // Fallback to Picsum placeholder if all retries fail
+      // PRIORITY 2: Generate with AI if no real image found
       if (!b64Image) {
-        const seed = post.id.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0) % 1000;
-        b64Image = `https://picsum.photos/seed/${seed}/800/800`;
-        console.log(`Using fallback image for post ${post.id}`);
+        while (!b64Image && retries < MAX_RETRIES) {
+          try {
+            b64Image = await generatePostImage(post.visualPrompt, profile);
+            
+            // Validate image URL is not empty/undefined
+            if (!b64Image || b64Image === 'undefined') {
+              b64Image = undefined;
+              retries++;
+              console.log(`Image generation attempt ${retries} failed for post ${post.id}, retrying...`);
+              await new Promise(r => setTimeout(r, 1000 * retries)); // Backoff delay
+            }
+          } catch (error) {
+            console.error(`Image generation error for post ${post.id}:`, error);
+            retries++;
+            await new Promise(r => setTimeout(r, 1000 * retries));
+          }
+        }
+      }
+      
+      // PRIORITY 3: Fallback to branded placeholder if all else fails
+      if (!b64Image) {
+        // Use branded placeholder from geminiService (will use brand colors)
+        console.log(`Using branded placeholder for post ${post.id}`);
+        b64Image = await generatePostImage(post.visualPrompt, profile);
       }
       
       setGeneratedPosts(current => 
