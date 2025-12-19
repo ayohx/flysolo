@@ -6,6 +6,70 @@ import {
 import { StoredBrand, listBrands, getBrandPostCount, deleteBrand } from '../services/supabaseService';
 import { PendingAnalysis, AppNotification } from '../types';
 
+// Logo Image with graceful fallback to initials
+interface BrandLogoProps {
+  src?: string | null;
+  brandName: string;
+  brandColor: string;
+  size?: 'sm' | 'md' | 'lg';
+}
+
+const BrandLogo: React.FC<BrandLogoProps> = ({ src, brandName, brandColor, size = 'md' }) => {
+  const [hasError, setHasError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const sizeClasses = {
+    sm: 'w-10 h-10',
+    md: 'w-14 h-14',
+    lg: 'w-20 h-20',
+  };
+
+  const textSizes = {
+    sm: 'text-sm',
+    md: 'text-base',
+    lg: 'text-xl',
+  };
+
+  // Generate initials from brand name
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(word => word[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  const showFallback = !src || hasError;
+
+  return (
+    <div 
+      className={`${sizeClasses[size]} rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0`}
+      style={{ backgroundColor: showFallback ? brandColor : `${brandColor}20` }}
+    >
+      {showFallback ? (
+        <span className={`text-white font-bold ${textSizes[size]}`}>{getInitials(brandName)}</span>
+      ) : (
+        <>
+          {isLoading && (
+            <Loader2 className="animate-spin text-gray-400" size={20} />
+          )}
+          <img 
+            src={src} 
+            alt={brandName} 
+            className={`w-full h-full object-contain transition-opacity ${isLoading ? 'opacity-0 absolute' : 'opacity-100'}`}
+            onLoad={() => setIsLoading(false)}
+            onError={() => {
+              setHasError(true);
+              setIsLoading(false);
+            }}
+          />
+        </>
+      )}
+    </div>
+  );
+};
+
 interface BrandSelectorProps {
   onSelectBrand: (brand: StoredBrand) => void;
   onNewBrand: () => void;
@@ -333,26 +397,12 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
 
                 {/* Brand Header */}
                 <div className="flex items-start gap-4 mb-4">
-                  <div 
-                    className="w-14 h-14 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0"
-                    style={{ backgroundColor: `${getBrandColor(brand)}20` }}
-                  >
-                    {brand.logo_url ? (
-                      <img 
-                        src={brand.logo_url} 
-                        alt={brand.name} 
-                        className="w-full h-full object-contain"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
-                    ) : (
-                      <Building2 
-                        className="w-7 h-7" 
-                        style={{ color: getBrandColor(brand) }}
-                      />
-                    )}
-                  </div>
+                  <BrandLogo 
+                    src={brand.logo_url}
+                    brandName={brand.name}
+                    brandColor={getBrandColor(brand)}
+                    size="md"
+                  />
                   <div className="flex-1 min-w-0">
                     <h3 className="text-lg font-semibold text-white truncate group-hover:text-indigo-300 transition-colors">
                       {brand.name}

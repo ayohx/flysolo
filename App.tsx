@@ -9,6 +9,7 @@ import CalendarPage from './components/CalendarPage';
 import BrandSelector from './components/BrandSelector';
 import NotificationBell from './components/NotificationBell';
 import NotificationToast from './components/NotificationToast';
+import { ToastContainer, useToast } from './components/Toast';
 import { analyzeBrand, generateContentIdeas, generatePostImage, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand } from './services/geminiService';
 import { saveBrand, saveBrandAssets, getBrandByUrl, findRelevantAsset, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
 import { Plus, X } from 'lucide-react';
@@ -127,6 +128,9 @@ function App() {
   const [currentBrandId, setCurrentBrandId] = useState<string | null>(null); // Supabase brand ID
   const [allBrands, setAllBrands] = useState<StoredBrand[]>([]); // All saved brands for switcher
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Toast notifications
+  const toast = useToast();
   
   // Check Supabase on mount and load brands
   useEffect(() => {
@@ -907,14 +911,23 @@ function App() {
         const updatedBrands = await listBrands();
         setAllBrands(updatedBrands);
         
-        // Show what changed
-        alert(`Refresh complete!\n\n${result.changes.join('\n')}`);
+        // Show what changed with beautiful toast
+        toast.success(
+          'Refresh Complete!',
+          result.changes.join(' • ')
+        );
       } else {
-        alert('No new information found. Your brand profile is up to date!');
+        toast.info(
+          'All Up to Date',
+          'No new information found. Your brand profile is current.'
+        );
       }
     } catch (error) {
       console.error('Soft refresh failed:', error);
-      alert('Refresh failed. Please try again.');
+      toast.error(
+        'Refresh Failed',
+        'Could not refresh brand data. Please try again.'
+      );
     }
     
     setIsRefreshing(false);
@@ -997,6 +1010,8 @@ function App() {
             onClose={() => setActiveToast(null)}
             onClick={handleNotificationClick}
           />
+          {/* Modern Toast Container */}
+          <ToastContainer toasts={toast.toasts} onDismiss={toast.dismissToast} />
         </>
       );
     case AppState.ONBOARDING:
@@ -1124,6 +1139,8 @@ function App() {
             onClose={() => setActiveToast(null)}
             onClick={handleNotificationClick}
           />
+          {/* Modern Toast Container */}
+          <ToastContainer toasts={toast.toasts} onDismiss={toast.dismissToast} />
           {editingPost && (
             <Editor 
               post={editingPost} 

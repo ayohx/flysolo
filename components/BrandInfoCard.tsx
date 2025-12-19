@@ -8,6 +8,83 @@ import {
   FolderOpen, ArrowLeftRight
 } from 'lucide-react';
 
+// Logo Image with fallback - handles broken images gracefully
+interface LogoImageProps {
+  src?: string;
+  alt: string;
+  brandName: string;
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
+}
+
+const LogoImage: React.FC<LogoImageProps> = ({ src, alt, brandName, size = 'md', className = '' }) => {
+  const [hasError, setHasError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const sizeClasses = {
+    sm: 'w-10 h-10',
+    md: 'w-12 h-12',
+    lg: 'w-16 h-16',
+  };
+
+  const iconSizes = {
+    sm: 16,
+    md: 20,
+    lg: 24,
+  };
+
+  // Generate initials from brand name
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(word => word[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  // Generate a consistent color from brand name
+  const getColorFromName = (name: string) => {
+    const colors = [
+      'bg-indigo-500', 'bg-purple-500', 'bg-pink-500', 'bg-blue-500',
+      'bg-cyan-500', 'bg-teal-500', 'bg-emerald-500', 'bg-amber-500'
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
+  };
+
+  if (!src || hasError) {
+    return (
+      <div className={`${sizeClasses[size]} ${getColorFromName(brandName)} rounded-lg flex items-center justify-center ${className}`}>
+        <span className="text-white font-bold text-sm">{getInitials(brandName)}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${sizeClasses[size]} relative rounded-lg overflow-hidden bg-gray-800/50 ${className}`}>
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-800/50">
+          <Loader2 className="animate-spin text-gray-500" size={iconSizes[size]} />
+        </div>
+      )}
+      <img
+        src={src}
+        alt={alt}
+        className={`w-full h-full object-contain transition-opacity ${isLoading ? 'opacity-0' : 'opacity-100'}`}
+        onLoad={() => setIsLoading(false)}
+        onError={() => {
+          setHasError(true);
+          setIsLoading(false);
+        }}
+      />
+    </div>
+  );
+};
+
 interface BrandInfoCardProps {
   profile: BrandProfile;
   onUpdate: (updatedProfile: BrandProfile) => void;
@@ -178,12 +255,13 @@ const BrandInfoCard: React.FC<BrandInfoCardProps> = ({
           className="lg:hidden w-full flex items-center justify-between mb-4 pb-4 border-b border-gray-800"
         >
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20 w-12 h-12 flex items-center justify-center overflow-hidden">
-              {profile.logoUrl ? (
-                <img src={profile.logoUrl} alt={`${profile.name} logo`} className="w-full h-full object-contain" />
-              ) : (
-                <Building2 className="text-indigo-400" size={20} />
-              )}
+            <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
+              <LogoImage 
+                src={profile.logoUrl} 
+                alt={`${profile.name} logo`} 
+                brandName={profile.name}
+                size="sm"
+              />
             </div>
             <div className="text-left">
               <h2 className="font-bold text-white">{profile.name}</h2>
@@ -259,12 +337,13 @@ const BrandInfoCard: React.FC<BrandInfoCardProps> = ({
 
             {/* Header (Desktop) */}
             <div className="hidden lg:flex items-center gap-3">
-              <div className="p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20 w-16 h-16 flex items-center justify-center overflow-hidden">
-                {profile.logoUrl ? (
-                  <img src={profile.logoUrl} alt={`${profile.name} logo`} className="w-full h-full object-contain" />
-                ) : (
-                  <Building2 className="text-indigo-400" size={24} />
-                )}
+              <div className="p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
+                <LogoImage 
+                  src={profile.logoUrl} 
+                  alt={`${profile.name} logo`} 
+                  brandName={profile.name}
+                  size="lg"
+                />
               </div>
               <div className="flex-1">
                 {isEditing ? (
