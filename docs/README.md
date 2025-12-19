@@ -8,8 +8,11 @@
 
 | Document | Purpose |
 |----------|---------|
-| [DEVLOG.md](./DEVLOG.md) | Development timeline, decisions, changelog (BMAD) |
+| **[index.md](./index.md)** | **Master AI entry point (BMAD)** — Start here! |
+| [project-overview.md](./project-overview.md) | High-level project context, goals, and scope |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Technical architecture and data models |
+| [source-tree-analysis.md](./source-tree-analysis.md) | Codebase structure and file organisation |
+| [DEVLOG.md](./DEVLOG.md) | Development timeline, decisions, changelog (BMAD) |
 | [ISSUES.md](./ISSUES.md) | Bug tracker and known issues |
 
 ---
