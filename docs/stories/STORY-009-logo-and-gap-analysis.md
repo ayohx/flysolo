@@ -1,9 +1,32 @@
 # STORY-009: Logo API Integration & Competitive Gap Resolution
 
 > **BMAD Framework**: Analyst Research → Story Manager Plan  
-> **Status**: 📋 PLANNED  
+> **Status**: ✅ COMPLETED (Task 1)  
 > **Priority**: HIGH  
-> **Created**: 19 December 2025
+> **Created**: 19 December 2025  
+> **Completed**: 19 December 2025
+
+## Implementation Summary
+
+**Task 1: Reliable Logo API** — ✅ COMPLETED
+
+Created `services/logoService.ts` with 3-tier fallback:
+1. **Logo.dev API** (if `VITE_LOGO_DEV_API_KEY` configured) — highest quality
+2. **Google Favicon API** (free, always works) — reliable fallback
+3. **Brand initials** with brand colour — graceful degradation
+
+**Files Changed:**
+- `services/logoService.ts` (NEW) — Logo service with domain extraction
+- `services/geminiService.ts` — Uses logo service for brand analysis
+- `components/BrandInfoCard.tsx` — Enhanced `LogoImage` with fallback chain
+- `components/BrandSelector.tsx` — Enhanced `BrandLogo` with Google Favicon
+- `components/SwipeDeck.tsx` — Added `sourceUrl` prop
+- `App.tsx` — Passes `sourceUrl` to SwipeDeck
+
+**Testing Results:**
+- Nike, Orekun Media, Holiday Extras, Apple all show actual logos
+- Google Favicon API successfully returns favicons for all tested domains
+- Fallback chain works correctly when primary URL fails
 
 ---
 
