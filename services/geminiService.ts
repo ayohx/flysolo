@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { BrandProfile, SocialPost } from "../types";
 import { searchPexelsImage, isPexelsConfigured } from "./pexelsService";
+import { getLogoUrlSync, extractDomain } from "./logoService";
 
 /**
  * Check if API keys are configured
@@ -486,6 +487,13 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
     
     const profile = normaliseBrandProfile(profileData);
     
+    // Use reliable logo service instead of AI-extracted logoUrl
+    const reliableLogoUrl = getLogoUrlSync(url);
+    if (reliableLogoUrl) {
+      profile.logoUrl = reliableLogoUrl;
+      console.log("🖼️ Logo URL set from logo service:", reliableLogoUrl);
+    }
+    
     console.log("📊 Initial profile quality:", {
       name: profile.name,
       servicesCount: profile.services?.length || 0,
@@ -537,6 +545,11 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
       console.log("🔄 Attempting targeted enrichment...");
       
       const enrichedProfile = normaliseBrandProfile(await enrichBrandProfile(profile, url, validationErrors));
+      
+      // Ensure logo URL is set from reliable source
+      if (!enrichedProfile.logoUrl || enrichedProfile.logoUrl.includes('undefined')) {
+        enrichedProfile.logoUrl = getLogoUrlSync(url);
+      }
       
       // Validate enriched profile
       const finalErrors: string[] = [];

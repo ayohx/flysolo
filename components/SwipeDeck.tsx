@@ -8,6 +8,7 @@ import { StoredBrand } from '../services/supabaseService';
 interface SwipeDeckProps {
   posts: SocialPost[];
   brandProfile: BrandProfile;
+  sourceUrl?: string; // Original URL for logo fallback
   likedPosts: SocialPost[];
   onLike: (post: SocialPost) => void;
   onReject: (post: SocialPost) => void;
@@ -32,7 +33,7 @@ interface SwipeDeckProps {
 }
 
 const SwipeDeck: React.FC<SwipeDeckProps> = ({ 
-    posts, brandProfile, likedPosts, onLike, onReject, onEdit, onEmpty, onFetchMore, 
+    posts, brandProfile, sourceUrl, likedPosts, onLike, onReject, onEdit, onEmpty, onFetchMore, 
     onUpdateProfile, onAddSource, onCustomCreate, onStartFresh, onDeletePost, onSchedulePost, onCalendar, loadingImages, isMerging, isGeneratingMore,
     allBrands = [], currentBrandId, onSwitchBrand, onBackToBrands
 }) => {
@@ -389,7 +390,8 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
         </button>
         
         <BrandInfoCard 
-          profile={brandProfile} 
+          profile={brandProfile}
+          sourceUrl={sourceUrl}
           onUpdate={onUpdateProfile} 
           onAddSource={onAddSource} 
           isMerging={isMerging}

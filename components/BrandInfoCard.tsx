@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { BrandProfile } from '../types';
 import { StoredBrand } from '../services/supabaseService';
+import { getGoogleFavicon, getBrandInitials, extractDomain } from '../services/logoService';
 import { 
   Building2, Palette, Globe, Tag, Sparkles, Save, Plus, Link, Loader2, 
   Instagram, Linkedin, Twitter, AtSign, CheckCircle2, Youtube, Facebook,
@@ -8,18 +9,22 @@ import {
   FolderOpen, ArrowLeftRight
 } from 'lucide-react';
 
-// Logo Image with fallback - handles broken images gracefully
+// Logo Image with fallback chain - handles broken images gracefully
+// Priority: 1. Provided src → 2. Google Favicon → 3. Brand initials
 interface LogoImageProps {
   src?: string;
   alt: string;
   brandName: string;
+  brandUrl?: string; // Used for Google Favicon fallback
   size?: 'sm' | 'md' | 'lg';
   className?: string;
 }
 
-const LogoImage: React.FC<LogoImageProps> = ({ src, alt, brandName, size = 'md', className = '' }) => {
-  const [hasError, setHasError] = useState(false);
+const LogoImage: React.FC<LogoImageProps> = ({ src, alt, brandName, brandUrl, size = 'md', className = '' }) => {
+  const [currentSrc, setCurrentSrc] = useState<string | null>(src || null);
+  const [fallbackAttempted, setFallbackAttempted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [showInitials, setShowInitials] = useState(false);
 
   const sizeClasses = {
     sm: 'w-10 h-10',
@@ -33,15 +38,13 @@ const LogoImage: React.FC<LogoImageProps> = ({ src, alt, brandName, size = 'md',
     lg: 24,
   };
 
-  // Generate initials from brand name
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map(word => word[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
-  };
+  // Reset state when src changes
+  useEffect(() => {
+    setCurrentSrc(src || null);
+    setFallbackAttempted(false);
+    setIsLoading(true);
+    setShowInitials(false);
+  }, [src]);
 
   // Generate a consistent color from brand name
   const getColorFromName = (name: string) => {
@@ -56,10 +59,43 @@ const LogoImage: React.FC<LogoImageProps> = ({ src, alt, brandName, size = 'md',
     return colors[Math.abs(hash) % colors.length];
   };
 
-  if (!src || hasError) {
+  const handleError = () => {
+    // If we haven't tried the fallback yet and have a URL to work with
+    if (!fallbackAttempted && brandUrl) {
+      console.log(`🔄 Logo failed for ${brandName}, trying Google Favicon...`);
+      const domain = extractDomain(brandUrl);
+      setCurrentSrc(getGoogleFavicon(domain, 128));
+      setFallbackAttempted(true);
+      setIsLoading(true);
+    } else {
+      // Fallback also failed, show initials
+      console.log(`📌 Showing initials for ${brandName}`);
+      setShowInitials(true);
+      setIsLoading(false);
+    }
+  };
+
+  // Show initials if no src provided and no URL to fallback to
+  if (showInitials || (!currentSrc && !brandUrl)) {
     return (
       <div className={`${sizeClasses[size]} ${getColorFromName(brandName)} rounded-lg flex items-center justify-center ${className}`}>
-        <span className="text-white font-bold text-sm">{getInitials(brandName)}</span>
+        <span className="text-white font-bold text-sm">{getBrandInitials(brandName)}</span>
+      </div>
+    );
+  }
+
+  // If no current src but we have a URL, try Google Favicon
+  if (!currentSrc && brandUrl) {
+    const domain = extractDomain(brandUrl);
+    const faviconUrl = getGoogleFavicon(domain, 128);
+    return (
+      <div className={`${sizeClasses[size]} relative rounded-lg overflow-hidden bg-gray-800/50 ${className}`}>
+        <img
+          src={faviconUrl}
+          alt={alt}
+          className="w-full h-full object-contain"
+          onError={() => setShowInitials(true)}
+        />
       </div>
     );
   }
@@ -72,14 +108,11 @@ const LogoImage: React.FC<LogoImageProps> = ({ src, alt, brandName, size = 'md',
         </div>
       )}
       <img
-        src={src}
+        src={currentSrc!}
         alt={alt}
         className={`w-full h-full object-contain transition-opacity ${isLoading ? 'opacity-0' : 'opacity-100'}`}
         onLoad={() => setIsLoading(false)}
-        onError={() => {
-          setHasError(true);
-          setIsLoading(false);
-        }}
+        onError={handleError}
       />
     </div>
   );
@@ -87,6 +120,7 @@ const LogoImage: React.FC<LogoImageProps> = ({ src, alt, brandName, size = 'md',
 
 interface BrandInfoCardProps {
   profile: BrandProfile;
+  sourceUrl?: string; // Original URL for logo fallback
   onUpdate: (updatedProfile: BrandProfile) => void;
   onAddSource: (url: string) => void;
   isMerging: boolean;
@@ -138,7 +172,7 @@ const formatHandle = (handle: string) => {
 };
 
 const BrandInfoCard: React.FC<BrandInfoCardProps> = ({ 
-  profile, onUpdate, onAddSource, isMerging, isCollapsed = false, onToggleCollapse,
+  profile, sourceUrl, onUpdate, onAddSource, isMerging, isCollapsed = false, onToggleCollapse,
   allBrands = [], currentBrandId, onSwitchBrand, onBackToBrands
 }) => {
   const [newSourceUrl, setNewSourceUrl] = useState('');
@@ -260,6 +294,7 @@ const BrandInfoCard: React.FC<BrandInfoCardProps> = ({
                 src={profile.logoUrl} 
                 alt={`${profile.name} logo`} 
                 brandName={profile.name}
+                brandUrl={sourceUrl}
                 size="sm"
               />
             </div>
@@ -342,6 +377,7 @@ const BrandInfoCard: React.FC<BrandInfoCardProps> = ({
                   src={profile.logoUrl} 
                   alt={`${profile.name} logo`} 
                   brandName={profile.name}
+                  brandUrl={sourceUrl}
                   size="lg"
                 />
               </div>

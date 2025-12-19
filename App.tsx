@@ -1051,6 +1051,7 @@ function App() {
                 <SwipeDeck 
                     posts={generatedPosts} 
                     brandProfile={brandProfile}
+                    sourceUrl={currentBrandId ? allBrands.find(b => b.id === currentBrandId)?.url : currentAnalysisUrl || undefined}
                     likedPosts={likedPosts}
                     onLike={handleLike}
                     onReject={handleReject}

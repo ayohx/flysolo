@@ -4,19 +4,23 @@ import {
   Calendar, ImageIcon, Clock, ChevronRight, Sparkles, AlertCircle, CheckCircle2
 } from 'lucide-react';
 import { StoredBrand, listBrands, getBrandPostCount, deleteBrand } from '../services/supabaseService';
+import { getGoogleFavicon, getBrandInitials, extractDomain } from '../services/logoService';
 import { PendingAnalysis, AppNotification } from '../types';
 
-// Logo Image with graceful fallback to initials
+// Logo Image with graceful fallback chain: 1. Provided src → 2. Google Favicon → 3. Initials
 interface BrandLogoProps {
   src?: string | null;
   brandName: string;
   brandColor: string;
+  brandUrl?: string; // Used for Google Favicon fallback
   size?: 'sm' | 'md' | 'lg';
 }
 
-const BrandLogo: React.FC<BrandLogoProps> = ({ src, brandName, brandColor, size = 'md' }) => {
-  const [hasError, setHasError] = useState(false);
+const BrandLogo: React.FC<BrandLogoProps> = ({ src, brandName, brandColor, brandUrl, size = 'md' }) => {
+  const [currentSrc, setCurrentSrc] = useState<string | null>(src || null);
+  const [fallbackAttempted, setFallbackAttempted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [showInitials, setShowInitials] = useState(false);
 
   const sizeClasses = {
     sm: 'w-10 h-10',
@@ -30,42 +34,75 @@ const BrandLogo: React.FC<BrandLogoProps> = ({ src, brandName, brandColor, size 
     lg: 'text-xl',
   };
 
-  // Generate initials from brand name
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map(word => word[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
+  // Reset state when src or brandUrl changes
+  useEffect(() => {
+    setCurrentSrc(src || null);
+    setFallbackAttempted(false);
+    setIsLoading(true);
+    setShowInitials(false);
+  }, [src, brandUrl]);
+
+  const handleError = () => {
+    // If we haven't tried the fallback yet and have a URL to work with
+    if (!fallbackAttempted && brandUrl) {
+      console.log(`🔄 Logo failed for ${brandName}, trying Google Favicon...`);
+      const domain = extractDomain(brandUrl);
+      setCurrentSrc(getGoogleFavicon(domain, 128));
+      setFallbackAttempted(true);
+      setIsLoading(true);
+    } else {
+      // Fallback also failed, show initials
+      setShowInitials(true);
+      setIsLoading(false);
+    }
   };
 
-  const showFallback = !src || hasError;
+  // Show initials if no src and no brandUrl, or if all attempts failed
+  if (showInitials || (!currentSrc && !brandUrl)) {
+    return (
+      <div 
+        className={`${sizeClasses[size]} rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0`}
+        style={{ backgroundColor: brandColor }}
+      >
+        <span className={`text-white font-bold ${textSizes[size]}`}>{getBrandInitials(brandName)}</span>
+      </div>
+    );
+  }
+
+  // If no current src but we have a URL, try Google Favicon
+  if (!currentSrc && brandUrl) {
+    const domain = extractDomain(brandUrl);
+    const faviconUrl = getGoogleFavicon(domain, 128);
+    return (
+      <div 
+        className={`${sizeClasses[size]} rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0`}
+        style={{ backgroundColor: `${brandColor}20` }}
+      >
+        <img 
+          src={faviconUrl} 
+          alt={brandName} 
+          className="w-full h-full object-contain"
+          onError={() => setShowInitials(true)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div 
       className={`${sizeClasses[size]} rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0`}
-      style={{ backgroundColor: showFallback ? brandColor : `${brandColor}20` }}
+      style={{ backgroundColor: `${brandColor}20` }}
     >
-      {showFallback ? (
-        <span className={`text-white font-bold ${textSizes[size]}`}>{getInitials(brandName)}</span>
-      ) : (
-        <>
-          {isLoading && (
-            <Loader2 className="animate-spin text-gray-400" size={20} />
-          )}
-          <img 
-            src={src} 
-            alt={brandName} 
-            className={`w-full h-full object-contain transition-opacity ${isLoading ? 'opacity-0 absolute' : 'opacity-100'}`}
-            onLoad={() => setIsLoading(false)}
-            onError={() => {
-              setHasError(true);
-              setIsLoading(false);
-            }}
-          />
-        </>
+      {isLoading && (
+        <Loader2 className="animate-spin text-gray-400" size={20} />
       )}
+      <img 
+        src={currentSrc!} 
+        alt={brandName} 
+        className={`w-full h-full object-contain transition-opacity ${isLoading ? 'opacity-0 absolute' : 'opacity-100'}`}
+        onLoad={() => setIsLoading(false)}
+        onError={handleError}
+      />
     </div>
   );
 };
@@ -401,6 +438,7 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
                     src={brand.logo_url}
                     brandName={brand.name}
                     brandColor={getBrandColor(brand)}
+                    brandUrl={brand.url}
                     size="md"
                   />
                   <div className="flex-1 min-w-0">
