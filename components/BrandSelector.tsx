@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Building2, Plus, RefreshCw, RotateCcw, Trash2, Loader2, 
-  Calendar, ImageIcon, Clock, ChevronRight, Sparkles
+  Calendar, ImageIcon, Clock, ChevronRight, Sparkles, AlertCircle, CheckCircle2
 } from 'lucide-react';
 import { StoredBrand, listBrands, getBrandPostCount, deleteBrand } from '../services/supabaseService';
+import { PendingAnalysis, AppNotification } from '../types';
 
 interface BrandSelectorProps {
   onSelectBrand: (brand: StoredBrand) => void;
   onNewBrand: () => void;
   onHardRefresh: (brand: StoredBrand) => void;
   onSoftRefresh: (brand: StoredBrand) => void;
+  pendingAnalyses?: Map<string, PendingAnalysis>;
+  onPendingAnalysisClick?: (notification: AppNotification) => void;
 }
 
 const BrandSelector: React.FC<BrandSelectorProps> = ({
@@ -17,12 +20,48 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
   onNewBrand,
   onHardRefresh,
   onSoftRefresh,
+  pendingAnalyses = new Map(),
+  onPendingAnalysisClick,
 }) => {
   const [brands, setBrands] = useState<StoredBrand[]>([]);
   const [loading, setLoading] = useState(true);
   const [postCounts, setPostCounts] = useState<Record<string, number>>({});
   const [refreshingBrand, setRefreshingBrand] = useState<string | null>(null);
   const [deletingBrand, setDeletingBrand] = useState<string | null>(null);
+
+  // Helper to normalise URLs for matching
+  const normaliseUrl = (url: string): string => {
+    return url.toLowerCase().replace(/\/$/, '').replace(/^https?:\/\//, '');
+  };
+
+  // Get status bar colour based on pending analysis state
+  const getStatusBarStyle = (brand: StoredBrand): { color: string; animate: boolean; status?: string } => {
+    const normalisedUrl = normaliseUrl(brand.url);
+    const pending = pendingAnalyses.get(normalisedUrl);
+    
+    if (!pending) {
+      // No pending analysis - use brand colour (normal state)
+      return { color: getBrandColor(brand), animate: false };
+    }
+    
+    switch (pending.status) {
+      case 'complete':
+        return { color: '#22c55e', animate: false, status: 'complete' };  // Green
+      case 'analysing':
+        return { color: '#f59e0b', animate: true, status: 'analysing' };   // Amber (pulsing)
+      case 'starting':
+        return { color: '#ef4444', animate: true, status: 'starting' };    // Red (pulsing)
+      case 'error':
+        return { color: '#ef4444', animate: false, status: 'error' };      // Red (static)
+      default:
+        return { color: getBrandColor(brand), animate: false };
+    }
+  };
+
+  // Get pending analysis for a URL (for cards without saved brands yet)
+  const getPendingForUrl = (url: string): PendingAnalysis | undefined => {
+    return pendingAnalyses.get(normaliseUrl(url));
+  };
 
   // Load brands on mount
   useEffect(() => {
@@ -144,17 +183,153 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {brands.map((brand) => (
+            {/* Pending Analysis Cards (for brands being analyzed that aren't saved yet) */}
+            {Array.from(pendingAnalyses.entries())
+              .filter(([url, pending]) => !brands.some(b => normaliseUrl(b.url) === url))
+              .map(([url, pending]) => (
+                <div
+                  key={pending.id}
+                  onClick={() => {
+                    if (pending.status === 'complete' && onPendingAnalysisClick) {
+                      onPendingAnalysisClick({
+                        id: pending.id,
+                        type: 'analysis_complete',
+                        title: `${pending.brandName || 'Brand'} is ready!`,
+                        message: 'Tap to view your brand DNA.',
+                        brandUrl: url,
+                        createdAt: pending.completedAt || new Date(),
+                        read: false,
+                      });
+                    }
+                  }}
+                  className={`group relative bg-gray-900 border border-gray-800 rounded-2xl p-5 ${
+                    pending.status === 'complete' ? 'cursor-pointer hover:border-gray-700 hover:shadow-xl' : ''
+                  } transition-all duration-200`}
+                >
+                  {/* Status bar */}
+                  <div 
+                    className={`absolute top-0 left-0 right-0 h-1.5 rounded-t-2xl transition-colors ${
+                      pending.status === 'analysing' || pending.status === 'starting' ? 'animate-pulse' : ''
+                    }`}
+                    style={{ 
+                      backgroundColor: pending.status === 'complete' ? '#22c55e' : 
+                                       pending.status === 'error' ? '#ef4444' : '#f59e0b'
+                    }}
+                  />
+
+                  {/* Status Badge */}
+                  <div className={`absolute top-3 right-3 flex items-center gap-1.5 px-2 py-0.5 rounded-full ${
+                    pending.status === 'complete' ? 'bg-green-500/20' :
+                    pending.status === 'error' ? 'bg-red-500/20' : 'bg-amber-500/20'
+                  }`}>
+                    {pending.status === 'complete' ? (
+                      <>
+                        <CheckCircle2 size={12} className="text-green-400" />
+                        <span className="text-xs text-green-400 font-medium">Ready</span>
+                      </>
+                    ) : pending.status === 'error' ? (
+                      <>
+                        <AlertCircle size={12} className="text-red-400" />
+                        <span className="text-xs text-red-400 font-medium">Error</span>
+                      </>
+                    ) : (
+                      <>
+                        <Loader2 size={12} className="animate-spin text-amber-400" />
+                        <span className="text-xs text-amber-400 font-medium">Analysing...</span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Pending Brand Header */}
+                  <div className="flex items-start gap-4 mb-4 mt-2">
+                    <div className="w-14 h-14 rounded-xl bg-gray-800 flex items-center justify-center flex-shrink-0">
+                      {pending.status === 'analysing' || pending.status === 'starting' ? (
+                        <Loader2 className="w-7 h-7 text-amber-400 animate-spin" />
+                      ) : pending.status === 'complete' ? (
+                        <CheckCircle2 className="w-7 h-7 text-green-400" />
+                      ) : (
+                        <AlertCircle className="w-7 h-7 text-red-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-lg font-semibold text-white truncate">
+                        {pending.brandName || 'Analysing brand...'}
+                      </h3>
+                      <p className="text-sm text-gray-500 truncate">{url}</p>
+                    </div>
+                    {pending.status === 'complete' && (
+                      <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-green-400 transition-colors flex-shrink-0" />
+                    )}
+                  </div>
+
+                  {/* Error message */}
+                  {pending.status === 'error' && pending.error && (
+                    <p className="text-xs text-red-400 bg-red-500/10 rounded-lg p-2 mb-4">
+                      {pending.error}
+                    </p>
+                  )}
+                </div>
+              ))}
+
+            {/* Saved Brand Cards */}
+            {brands.map((brand) => {
+              const statusBar = getStatusBarStyle(brand);
+              const pending = getPendingForUrl(brand.url);
+              
+              return (
               <div
                 key={brand.id}
-                onClick={() => onSelectBrand(brand)}
+                onClick={() => {
+                  if (pending?.status === 'complete' && onPendingAnalysisClick) {
+                    // If there's a completed pending analysis, handle it
+                    onPendingAnalysisClick({
+                      id: pending.id,
+                      type: 'analysis_complete',
+                      title: `${pending.brandName || brand.name} is ready!`,
+                      message: 'Tap to view your brand DNA.',
+                      brandUrl: normaliseUrl(brand.url),
+                      createdAt: pending.completedAt || new Date(),
+                      read: false,
+                    });
+                  } else {
+                    onSelectBrand(brand);
+                  }
+                }}
                 className="group relative bg-gray-900 border border-gray-800 rounded-2xl p-5 cursor-pointer hover:border-gray-700 hover:shadow-xl transition-all duration-200"
               >
-                {/* Color accent bar */}
+                {/* Status-aware accent bar */}
                 <div 
-                  className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl"
-                  style={{ backgroundColor: getBrandColor(brand) }}
+                  className={`absolute top-0 left-0 right-0 h-1.5 rounded-t-2xl transition-colors ${
+                    statusBar.animate ? 'animate-pulse' : ''
+                  }`}
+                  style={{ backgroundColor: statusBar.color }}
                 />
+
+                {/* Status Badge for pending analyses */}
+                {statusBar.status === 'analysing' && (
+                  <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2 py-0.5 bg-amber-500/20 rounded-full">
+                    <Loader2 size={12} className="animate-spin text-amber-400" />
+                    <span className="text-xs text-amber-400 font-medium">Analysing...</span>
+                  </div>
+                )}
+                {statusBar.status === 'complete' && (
+                  <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2 py-0.5 bg-green-500/20 rounded-full">
+                    <CheckCircle2 size={12} className="text-green-400" />
+                    <span className="text-xs text-green-400 font-medium">Ready</span>
+                  </div>
+                )}
+                {statusBar.status === 'error' && (
+                  <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2 py-0.5 bg-red-500/20 rounded-full">
+                    <AlertCircle size={12} className="text-red-400" />
+                    <span className="text-xs text-red-400 font-medium">Error</span>
+                  </div>
+                )}
+                {statusBar.status === 'starting' && (
+                  <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2 py-0.5 bg-red-500/20 rounded-full">
+                    <Loader2 size={12} className="animate-spin text-red-400" />
+                    <span className="text-xs text-red-400 font-medium">Starting...</span>
+                  </div>
+                )}
 
                 {/* Brand Header */}
                 <div className="flex items-start gap-4 mb-4">
@@ -184,7 +359,7 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
                     </h3>
                     <p className="text-sm text-gray-500 truncate">{brand.industry}</p>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-indigo-400 transition-colors flex-shrink-0" />
+                  <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-indigo-400 transition-colors flex-shrink-0 mt-1" />
                 </div>
 
                 {/* Stats */}
@@ -248,7 +423,8 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
                   </button>
                 </div>
               </div>
-            ))}
+            );
+            })}
 
             {/* Add New Brand Card */}
             <div

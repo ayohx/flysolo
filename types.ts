@@ -50,3 +50,47 @@ export interface AnalysisError {
   message: string;
   type: 'validation' | 'network' | 'analysis';
 }
+
+// ============================================================================
+// BACKGROUND ANALYSIS & NOTIFICATION SYSTEM
+// ============================================================================
+
+/**
+ * Status of a background brand analysis
+ */
+export type AnalysisStatus = 'idle' | 'starting' | 'analysing' | 'complete' | 'error';
+
+/**
+ * Tracks a brand analysis running in the background
+ */
+export interface PendingAnalysis {
+  id: string;
+  url: string;
+  brandName?: string;        // Populated once known from analysis
+  status: AnalysisStatus;
+  progress: number;          // 0-100
+  startedAt: Date;
+  completedAt?: Date;
+  profile?: BrandProfile;    // Populated on completion
+  posts?: SocialPost[];      // Populated on completion
+  error?: string;            // Error message if failed
+}
+
+/**
+ * Notification types for the app
+ */
+export type NotificationType = 'analysis_complete' | 'analysis_failed' | 'video_ready';
+
+/**
+ * App notification displayed in the notification bell and toast
+ */
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  brandId?: string;
+  brandUrl?: string;
+  createdAt: Date;
+  read: boolean;
+}

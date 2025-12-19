@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { AnalysisStage } from '../types';
-import { Loader2, CheckCircle2, Search, BrainCircuit, PenTool, XCircle } from 'lucide-react';
+import { Loader2, CheckCircle2, Search, BrainCircuit, PenTool, XCircle, ArrowLeft } from 'lucide-react';
 
 interface AnalysisLoaderProps {
   stages: AnalysisStage[];
+  onContinueInBackground?: () => void;
 }
 
-const AnalysisLoader: React.FC<AnalysisLoaderProps> = ({ stages }) => {
+const AnalysisLoader: React.FC<AnalysisLoaderProps> = ({ stages, onContinueInBackground }) => {
   // Matrix rain effect - multiple columns
   const [columns, setColumns] = useState<string[][]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -208,6 +209,22 @@ const AnalysisLoader: React.FC<AnalysisLoaderProps> = ({ stages }) => {
               </div>
             ))}
           </div>
+
+          {/* Continue in Background Button */}
+          {!hasError && onContinueInBackground && (
+            <div className="mt-8 pt-6 border-t border-gray-800">
+              <button
+                onClick={onContinueInBackground}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-xl font-medium transition-all group"
+              >
+                <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
+                Continue in Background
+              </button>
+              <p className="text-xs text-gray-500 text-center mt-2">
+                We'll notify you when this brand is ready
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

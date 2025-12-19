@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { AppState, BrandProfile, SocialPost, AnalysisStage } from './types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { AppState, BrandProfile, SocialPost, AnalysisStage, PendingAnalysis, AppNotification } from './types';
 import Onboarding from './components/Onboarding';
 import AnalysisLoader from './components/AnalysisLoader';
 import SwipeDeck from './components/SwipeDeck';
@@ -7,6 +7,8 @@ import Editor from './components/Editor';
 import Dashboard from './components/Dashboard';
 import CalendarPage from './components/CalendarPage';
 import BrandSelector from './components/BrandSelector';
+import NotificationBell from './components/NotificationBell';
+import NotificationToast from './components/NotificationToast';
 import { analyzeBrand, generateContentIdeas, generatePostImage, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand } from './services/geminiService';
 import { saveBrand, saveBrandAssets, getBrandByUrl, findRelevantAsset, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
 import { Plus, X } from 'lucide-react';
@@ -17,6 +19,13 @@ const STORAGE_KEYS = {
   GENERATED_POSTS: 'flysolo_generated_posts',
   LIKED_POSTS: 'flysolo_liked_posts',
   APP_STATE: 'flysolo_app_state',
+  PENDING_ANALYSES: 'flysolo_pending_analyses',
+  NOTIFICATIONS: 'flysolo_notifications',
+};
+
+// Helper to normalise URLs for consistent tracking
+const normaliseUrl = (url: string): string => {
+  return url.toLowerCase().replace(/\/$/, '').replace(/^https?:\/\//, '');
 };
 
 // Helper to load from localStorage (only works client-side)
@@ -153,6 +162,253 @@ function App() {
   // Video polling state - track operations in progress
   const [pendingVideos, setPendingVideos] = useState<Map<string, string>>(new Map()); // postId -> operationName
 
+  // ============================================================================
+  // BACKGROUND ANALYSIS & NOTIFICATION SYSTEM
+  // ============================================================================
+  
+  // Background analyses keyed by normalised URL
+  const [pendingAnalyses, setPendingAnalyses] = useState<Map<string, PendingAnalysis>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.PENDING_ANALYSES);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return new Map(Object.entries(parsed));
+      }
+    } catch {}
+    return new Map();
+  });
+  
+  // App notifications
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+      if (saved) {
+        return JSON.parse(saved).map((n: any) => ({
+          ...n,
+          createdAt: new Date(n.createdAt),
+        }));
+      }
+    } catch {}
+    return [];
+  });
+  
+  // Toast notification to display
+  const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
+  
+  // URL currently being analyzed (for foreground mode)
+  const [currentAnalysisUrl, setCurrentAnalysisUrl] = useState<string | null>(null);
+  
+  // Persist pending analyses to localStorage
+  useEffect(() => {
+    if (!isHydrated) return;
+    const obj = Object.fromEntries(pendingAnalyses);
+    localStorage.setItem(STORAGE_KEYS.PENDING_ANALYSES, JSON.stringify(obj));
+  }, [pendingAnalyses, isHydrated]);
+  
+  // Persist notifications to localStorage
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
+  }, [notifications, isHydrated]);
+  
+  // Helper to update pending analysis status
+  const updatePendingStatus = useCallback((
+    url: string, 
+    status: PendingAnalysis['status'], 
+    extras?: Partial<PendingAnalysis>
+  ) => {
+    setPendingAnalyses(prev => {
+      const existing = prev.get(url);
+      if (!existing) return prev;
+      
+      const updated = new Map(prev);
+      updated.set(url, {
+        ...existing,
+        status,
+        ...(extras || {}),
+        ...(status === 'complete' ? { completedAt: new Date() } : {}),
+      });
+      return updated;
+    });
+  }, []);
+  
+  // Add a new notification
+  const addNotification = useCallback((notification: Omit<AppNotification, 'id' | 'createdAt' | 'read'>) => {
+    const newNotification: AppNotification = {
+      ...notification,
+      id: crypto.randomUUID(),
+      createdAt: new Date(),
+      read: false,
+    };
+    
+    setNotifications(prev => [newNotification, ...prev]);
+    setActiveToast(newNotification);
+  }, []);
+  
+  // Mark notification as read
+  const handleMarkNotificationAsRead = useCallback((notificationId: string) => {
+    setNotifications(prev => 
+      prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
+    );
+  }, []);
+  
+  // Clear all notifications
+  const handleClearAllNotifications = useCallback(() => {
+    setNotifications([]);
+  }, []);
+  
+  // Handle notification click - navigate to the brand
+  const handleNotificationClick = useCallback(async (notification: AppNotification) => {
+    if (notification.brandUrl) {
+      const pending = pendingAnalyses.get(notification.brandUrl);
+      
+      if (pending?.status === 'complete' && pending.profile && pending.posts) {
+        // Load the completed analysis
+        setBrandProfile(pending.profile);
+        setGeneratedPosts(pending.posts);
+        setLikedPosts([]);
+        
+        // Start image generation
+        startImageGeneration(pending.posts.slice(0, 5), pending.profile);
+        
+        // Save to Supabase
+        const fullUrl = notification.brandUrl.startsWith('http') 
+          ? notification.brandUrl 
+          : `https://${notification.brandUrl}`;
+        saveBrand(fullUrl, pending.profile).then(async (storedBrand) => {
+          if (storedBrand) {
+            setCurrentBrandId(storedBrand.id);
+            // Refresh brands list
+            const brands = await listBrands();
+            setAllBrands(brands);
+          }
+        });
+        
+        // Remove from pending analyses
+        setPendingAnalyses(prev => {
+          const updated = new Map(prev);
+          updated.delete(notification.brandUrl!);
+          return updated;
+        });
+        
+        setAppState(AppState.SWIPING);
+      } else {
+        // Try to find brand in allBrands by URL
+        const brand = allBrands.find(b => normaliseUrl(b.url) === notification.brandUrl);
+        if (brand) {
+          await handleSelectBrand(brand);
+        }
+      }
+    }
+    
+    // Mark as read
+    handleMarkNotificationAsRead(notification.id);
+  }, [pendingAnalyses, allBrands]);
+  
+  // Run analysis in background (non-blocking)
+  const runAnalysisInBackground = useCallback(async (url: string) => {
+    const normalisedUrl = normaliseUrl(url);
+    
+    try {
+      // Update to 'analysing' status (AMBER)
+      updatePendingStatus(normalisedUrl, 'analysing');
+      
+      // 1. Analyse Brand
+      const profile = await analyzeBrand(url);
+      
+      // Update with brand name once known
+      updatePendingStatus(normalisedUrl, 'analysing', { brandName: profile.name });
+      
+      // 2. Generate Content Ideas
+      const posts = await generateContentIdeas(profile, 10);
+      
+      // Complete! Update to 'complete' status (GREEN)
+      updatePendingStatus(normalisedUrl, 'complete', { profile, posts });
+      
+      // Create notification
+      addNotification({
+        type: 'analysis_complete',
+        title: `${profile.name} is ready!`,
+        message: 'Tap to view your brand DNA and content ideas.',
+        brandUrl: normalisedUrl,
+      });
+      
+      // Save to Supabase in background
+      saveBrand(url, profile).then(async (storedBrand) => {
+        if (storedBrand) {
+          console.log('✅ Background brand saved to Supabase:', storedBrand.id);
+          
+          // Save discovered image assets
+          if (profile.imageAssets && profile.imageAssets.length > 0) {
+            const assetCount = await saveBrandAssets(storedBrand.id, profile.imageAssets);
+            console.log(`✅ Saved ${assetCount} image assets to Supabase`);
+          }
+          
+          // Refresh brands list
+          const brands = await listBrands();
+          setAllBrands(brands);
+        }
+      }).catch(err => console.warn('Supabase save failed (non-critical):', err));
+      
+    } catch (error: any) {
+      console.error('Background analysis failed:', error);
+      
+      // Error! Update to 'error' status (RED)
+      updatePendingStatus(normalisedUrl, 'error', { 
+        error: error.message || 'Analysis failed' 
+      });
+      
+      addNotification({
+        type: 'analysis_failed',
+        title: 'Analysis failed',
+        message: error.message || 'Could not analyse brand.',
+        brandUrl: normalisedUrl,
+      });
+    }
+  }, [updatePendingStatus, addNotification]);
+  
+  // Start background analysis
+  const startBackgroundAnalysis = useCallback((url: string) => {
+    const normalisedUrl = normaliseUrl(url);
+    const analysisId = crypto.randomUUID();
+    
+    // Add to pending queue with 'starting' status (RED)
+    setPendingAnalyses(prev => new Map(prev).set(normalisedUrl, {
+      id: analysisId,
+      url: normalisedUrl,
+      status: 'starting',
+      progress: 0,
+      startedAt: new Date(),
+    }));
+    
+    // Run analysis in background (non-blocking)
+    runAnalysisInBackground(url);
+    
+    // Navigate user to brand selector
+    setAppState(AppState.BRAND_SELECTOR);
+  }, [runAnalysisInBackground]);
+  
+  // Handle continuing analysis in background (called from AnalysisLoader)
+  const handleContinueInBackground = useCallback(() => {
+    if (currentAnalysisUrl) {
+      // The analysis is already running in handleStartAnalysis
+      // We just need to add it to pendingAnalyses and navigate away
+      const normalisedUrl = normaliseUrl(currentAnalysisUrl);
+      
+      // Add to pending with 'analysing' status since it's already started
+      setPendingAnalyses(prev => new Map(prev).set(normalisedUrl, {
+        id: crypto.randomUUID(),
+        url: normalisedUrl,
+        status: 'analysing',
+        progress: 25, // Approximate progress
+        startedAt: new Date(),
+      }));
+      
+      // Navigate to brand selector
+      setAppState(AppState.BRAND_SELECTOR);
+    }
+  }, [currentAnalysisUrl]);
+
   // Reset analysis stages when returning to onboarding
   const resetAnalysisStages = () => {
     setAnalysisStages([
@@ -168,6 +424,9 @@ function App() {
     setAnalysisError(null);
     resetAnalysisStages();
     setAppState(AppState.ANALYZING);
+    setCurrentAnalysisUrl(url); // Track for background mode
+    
+    const normalisedUrl = normaliseUrl(url);
     
     // Simulate progressive loading steps for UX while API works
     const updateStage = (index: number, status: 'loading' | 'done' | 'error') => {
@@ -179,6 +438,10 @@ function App() {
     try {
       // 1. Analyse Brand
       const profile = await analyzeBrand(url);
+      
+      // Check if user moved to background mode
+      // If so, the pending analysis will be updated there
+      
       updateStage(0, 'done');
       updateStage(1, 'loading');
       setBrandProfile(profile);
@@ -208,12 +471,24 @@ function App() {
             const assetCount = await saveBrandAssets(storedBrand.id, profile.imageAssets);
             console.log(`✅ Saved ${assetCount} image assets to Supabase`);
           }
+          
+          // Refresh brands list
+          const brands = await listBrands();
+          setAllBrands(brands);
         }
       }).catch(err => console.warn('Supabase save failed (non-critical):', err));
 
       // 5. Start Image Generation in Background for the first few posts
       // Generate images for first 5 posts immediately to ensure smooth experience
       startImageGeneration(posts.slice(0, 5), profile);
+
+      // Clear current analysis URL
+      setCurrentAnalysisUrl(null);
+      
+      // If there was a pending analysis for this URL, complete it
+      if (pendingAnalyses.has(normalisedUrl)) {
+        updatePendingStatus(normalisedUrl, 'complete', { profile, posts });
+      }
 
       setAppState(AppState.SWIPING);
       
@@ -225,8 +500,16 @@ function App() {
         s.status === 'loading' ? { ...s, status: 'error' } : s
       ));
       
+      // Update pending analysis if it exists
+      if (pendingAnalyses.has(normalisedUrl)) {
+        updatePendingStatus(normalisedUrl, 'error', { 
+          error: error.message || 'Analysis failed' 
+        });
+      }
+      
       // Set error message and return to onboarding after delay
       setAnalysisError(error.message || "Analysis failed. Please try again.");
+      setCurrentAnalysisUrl(null);
       
       setTimeout(() => {
         setAppState(AppState.ONBOARDING);
@@ -690,21 +973,51 @@ function App() {
   switch (appState) {
     case AppState.BRAND_SELECTOR:
       return (
-        <BrandSelector
-          onSelectBrand={handleSelectBrand}
-          onNewBrand={handleNewBrand}
-          onHardRefresh={handleHardRefresh}
-          onSoftRefresh={handleSoftRefresh}
-        />
+        <>
+          <BrandSelector
+            onSelectBrand={handleSelectBrand}
+            onNewBrand={handleNewBrand}
+            onHardRefresh={handleHardRefresh}
+            onSoftRefresh={handleSoftRefresh}
+            pendingAnalyses={pendingAnalyses}
+            onPendingAnalysisClick={handleNotificationClick}
+          />
+          {/* Global Notification Bell */}
+          <div className="fixed top-4 right-4 z-50">
+            <NotificationBell
+              notifications={notifications}
+              onNotificationClick={handleNotificationClick}
+              onMarkAsRead={handleMarkNotificationAsRead}
+              onClearAll={handleClearAllNotifications}
+            />
+          </div>
+          {/* Toast Notifications */}
+          <NotificationToast
+            notification={activeToast}
+            onClose={() => setActiveToast(null)}
+            onClick={handleNotificationClick}
+          />
+        </>
       );
     case AppState.ONBOARDING:
       return <Onboarding onStart={handleStartAnalysis} errorMessage={analysisError} />;
     case AppState.ANALYZING:
-      return <AnalysisLoader stages={analysisStages} />;
+      return (
+        <AnalysisLoader 
+          stages={analysisStages} 
+          onContinueInBackground={handleContinueInBackground}
+        />
+      );
     case AppState.SWIPING:
       return (
         <div className="h-screen w-full bg-gray-950 flex items-center justify-center p-4 relative">
-            <div className="absolute top-4 right-4 z-20">
+            <div className="absolute top-4 right-4 z-20 flex items-center gap-3">
+                 <NotificationBell
+                    notifications={notifications}
+                    onNotificationClick={handleNotificationClick}
+                    onMarkAsRead={handleMarkNotificationAsRead}
+                    onClearAll={handleClearAllNotifications}
+                 />
                  <button 
                     onClick={() => setAppState(AppState.DASHBOARD)}
                     className="text-gray-400 hover:text-white text-sm font-medium"
@@ -712,6 +1025,12 @@ function App() {
                     Skip to Saved ({likedPosts.length})
                  </button>
             </div>
+            {/* Toast Notifications */}
+            <NotificationToast
+              notification={activeToast}
+              onClose={() => setActiveToast(null)}
+              onClick={handleNotificationClick}
+            />
             
             {brandProfile && (
                 <SwipeDeck 
@@ -790,6 +1109,21 @@ function App() {
             onSelectPost={handleEditOpen}
             onReschedulePost={handleReschedulePost}
           />
+          {/* Global Notification Bell */}
+          <div className="fixed top-4 right-4 z-50">
+            <NotificationBell
+              notifications={notifications}
+              onNotificationClick={handleNotificationClick}
+              onMarkAsRead={handleMarkNotificationAsRead}
+              onClearAll={handleClearAllNotifications}
+            />
+          </div>
+          {/* Toast Notifications */}
+          <NotificationToast
+            notification={activeToast}
+            onClose={() => setActiveToast(null)}
+            onClick={handleNotificationClick}
+          />
           {editingPost && (
             <Editor 
               post={editingPost} 
@@ -810,6 +1144,21 @@ function App() {
                 profile={brandProfile} 
                 onUpdatePost={handleUpdatePost} 
                 onEditPost={handleEditOpen}
+            />
+            {/* Global Notification Bell */}
+            <div className="fixed top-4 right-4 z-50">
+              <NotificationBell
+                notifications={notifications}
+                onNotificationClick={handleNotificationClick}
+                onMarkAsRead={handleMarkNotificationAsRead}
+                onClearAll={handleClearAllNotifications}
+              />
+            </div>
+            {/* Toast Notifications */}
+            <NotificationToast
+              notification={activeToast}
+              onClose={() => setActiveToast(null)}
+              onClick={handleNotificationClick}
             />
             {editingPost && (
                 <Editor 
