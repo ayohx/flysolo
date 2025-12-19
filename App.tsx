@@ -841,7 +841,7 @@ function App() {
   const handleSelectBrand = async (brand: StoredBrand) => {
     console.log('📦 Loading brand workspace:', brand.name);
     
-    // Load workspace from Supabase
+    // Load workspace from Supabase (quick operation)
     const workspace = await loadBrandWorkspace(brand.id);
     if (!workspace) {
       console.error('Failed to load brand workspace');
@@ -859,14 +859,22 @@ function App() {
     }));
     setLikedPosts(likedFromDb);
     
-    // Generate fresh content for the deck
-    const freshPosts = await generateContentIdeas(workspace.brand.profile_json, 10);
-    setGeneratedPosts(freshPosts);
-    
-    // Start image generation with explicit brand ID to avoid stale state
-    startImageGeneration(freshPosts.slice(0, 5), workspace.brand.profile_json, brand.id);
-    
+    // NAVIGATE IMMEDIATELY - don't wait for AI content generation
     setAppState(AppState.SWIPING);
+    setIsGeneratingMore(true); // Show loading indicator
+    
+    // Generate fresh content in background (non-blocking)
+    generateContentIdeas(workspace.brand.profile_json, 10)
+      .then(freshPosts => {
+        setGeneratedPosts(freshPosts);
+        // Start image generation with explicit brand ID to avoid stale state
+        startImageGeneration(freshPosts.slice(0, 5), workspace.brand.profile_json, brand.id);
+        setIsGeneratingMore(false);
+      })
+      .catch(err => {
+        console.error('Failed to generate content:', err);
+        setIsGeneratingMore(false);
+      });
   };
 
   const handleNewBrand = () => {
