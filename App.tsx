@@ -659,6 +659,7 @@ function App() {
       let retries = 0;
       
       // PRIORITY 1: Check Supabase for real product images
+      // CRITICAL: Only use if URL is validated (many brand assets have fake/hallucinated URLs)
       if (activeBrandId) {
         try {
           // Extract product name from caption/visual prompt for matching
@@ -666,9 +667,21 @@ function App() {
           const realAsset = await findRelevantAsset(activeBrandId, searchTerm);
           
           if (realAsset && realAsset.url) {
-            console.log(`🎯 Using REAL product image for post ${post.id}:`, realAsset.label);
-            imageUrl = realAsset.url;
-            imageSource = 'imagen3'; // Treat real assets as AI-quality
+            // Validate URL: must start with https:// and not be a hallucinated domain URL
+            const isValidUrl = realAsset.url.startsWith('https://') && 
+              (realAsset.url.includes('images.pexels.com') || 
+               realAsset.url.includes('supabase.co') ||
+               realAsset.url.includes('cloudinary.com') ||
+               realAsset.url.includes('unsplash.com') ||
+               realAsset.url.startsWith('data:image/'));
+            
+            if (isValidUrl) {
+              console.log(`🎯 Using REAL product image for post ${post.id}:`, realAsset.label);
+              imageUrl = realAsset.url;
+              imageSource = 'imagen3'; // Treat real assets as AI-quality
+            } else {
+              console.warn(`⚠️ Skipping asset with invalid/fake URL: ${realAsset.url.substring(0, 50)}...`);
+            }
           }
         } catch (e) {
           console.warn('Asset lookup failed, falling back to AI:', e);
@@ -761,10 +774,28 @@ function App() {
 
   const handleLike = (post: SocialPost) => {
     setLikedPosts(prev => [...prev, { ...post, status: 'liked' }]);
+    
+    // Remove from generated posts and update cache
+    setGeneratedPosts(prev => {
+      const updated = prev.filter(p => p.id !== post.id);
+      // Update cache with remaining posts
+      if (currentBrandId) {
+        updateCachedPosts(currentBrandId, updated);
+      }
+      return updated;
+    });
   };
 
   const handleReject = (post: SocialPost) => {
-    // Just discard
+    // Remove from generated posts and update cache
+    setGeneratedPosts(prev => {
+      const updated = prev.filter(p => p.id !== post.id);
+      // Update cache with remaining posts
+      if (currentBrandId) {
+        updateCachedPosts(currentBrandId, updated);
+      }
+      return updated;
+    });
   };
 
   const handleFetchMore = async () => {
