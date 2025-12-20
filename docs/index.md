@@ -9,10 +9,19 @@
 | Document | Purpose | Last Updated |
 |----------|---------|--------------|
 | [Project Overview](./project-overview.md) | High-level project context, goals, and scope | 19 Dec 2025 |
-| [Architecture](./ARCHITECTURE.md) | Technical architecture, data models, API integration | 19 Dec 2025 |
+| [Architecture](./ARCHITECTURE.md) | Technical architecture, data models, API integration | 20 Dec 2024 |
 | [Source Tree Analysis](./source-tree-analysis.md) | Codebase structure and file organisation | 19 Dec 2025 |
-| [Development Log](./DEVLOG.md) | Timeline, decisions, issues, and solutions (BMAD) | 19 Dec 2025 |
+| [Development Log](./DEVLOG.md) | Timeline, decisions, issues, and solutions (BMAD) | 20 Dec 2024 |
 | [Issues Tracker](./ISSUES.md) | Known bugs and limitations | 19 Dec 2025 |
+| [Sprint Status](./sprint-status.yaml) | Current sprint progress and tasks | 20 Dec 2024 |
+
+### 📖 Story Documentation
+
+| Story | Title | Status |
+|-------|-------|--------|
+| [STORY-011](./stories/STORY-011-rate-limiting-and-caching.md) | Rate Limiting and Content Caching | ✅ Complete |
+| [STORY-012](./stories/STORY-012-veo-image-to-video-fix.md) | VEO Image-to-Video Analysis | ✅ Complete |
+| [STORY-013](./stories/STORY-013-veo-video-and-brand-navigation.md) | VEO Vertex AI & Brand Navigation | ✅ Complete |
 
 ---
 
@@ -198,7 +207,16 @@ interface SocialPost {
 ### Current Phase
 **Active Development** — Feature enhancements and bug fixes
 
-### Recent Updates (v0.8.0)
+### Recent Updates (v0.9.0 - 20 Dec 2024)
+- ✅ VEO video generation via Vertex AI
+- ✅ Image-to-video with source image as first frame
+- ✅ URL-based brand navigation (`/brand/brand-slug`)
+- ✅ Instant brand switching with state clearing
+- ✅ Status polling via Netlify serverless function (CORS fix)
+- ✅ Rate limiting for API calls
+- ✅ Content caching to reduce API usage
+
+### Previous Updates (v0.8.0)
 - ✅ Brand workspace with multi-brand support
 - ✅ Modern toast notifications
 - ✅ Logo fallback with brand initials
@@ -206,10 +224,10 @@ interface SocialPost {
 - ✅ Multi-API key rotation for Imagen
 
 ### Next Steps
-- [ ] Performance optimisations
+- [ ] Video playback UI component
+- [ ] Video caching/storage
 - [ ] Export functionality
-- [ ] Rate limiting & quota management
-- [ ] Enhanced video generation
+- [ ] Performance optimisations (code splitting)
 
 ---
 
@@ -252,6 +270,6 @@ When making changes:
 
 ---
 
-*Last Updated: 19 December 2025*  
-*Documentation Version: 1.0 (BMAD Framework)*
+*Last Updated: 20 December 2024*  
+*Documentation Version: 1.1 (BMAD Framework)*
 

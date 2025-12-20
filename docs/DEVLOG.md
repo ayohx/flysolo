@@ -614,6 +614,57 @@ define: {
 
 ## 📅 Session Logs (BMAD)
 
+### Session: 20 December 2024 — VEO Vertex AI Integration & Brand Navigation
+**Duration**: ~3 hours  
+**Focus**: Fix video generation, implement URL-based brand switching
+
+#### ✅ Work Completed
+| Time | Task | Status |
+|------|------|--------|
+| 17:00 | Diagnosed VEO 403 errors - billing not enabled | ✅ |
+| 17:15 | Configured GCP service account for Vertex AI | ✅ |
+| 17:30 | Enabled billing on `flysolo-video-test` project | ✅ |
+| 17:45 | VEO video generation working (Status 200) | ✅ |
+| 18:00 | Diagnosed CORS errors on status polling | ✅ |
+| 18:15 | Added status action to Netlify function | ✅ |
+| 18:30 | Updated `checkVideoStatus` to use Netlify | ✅ |
+| 18:45 | Implemented URL-based brand navigation | ✅ |
+| 19:00 | Added `/brand/:brandSlug` route | ✅ |
+| 19:15 | Implemented instant brand state clearing | ✅ |
+| 19:30 | Created STORY-013 documentation | ✅ |
+
+#### 🐛 Issues Encountered
+- **VEO SDK Limitation**: `generateVideos()` only supports text-to-video, not image input
+- **CORS Blocked**: Direct Vertex AI calls blocked by browser
+- **Status Polling CORS**: Video operation status checks also blocked
+- **Billing Required**: Vertex AI requires billing even for free tier
+- **Stale Content**: Previous brand's cards visible when switching
+
+#### 💡 Decisions Made
+- **ADR-008**: Route all VEO calls through Netlify serverless function
+- **ADR-009**: Use Vertex AI REST API with service account authentication
+- **ADR-010**: URL-based brand navigation (`/brand/brand-slug`)
+- **ADR-011**: Clear brand state immediately on switch (not after load)
+
+#### 📊 Components Modified
+| Component | Changes |
+|-----------|---------|
+| `generate-video.ts` | Added status action, Vertex AI integration |
+| `geminiService.ts` | Route video calls through Netlify |
+| `index.tsx` | Added brand route |
+| `App.tsx` | URL navigation, state clearing, slug handling |
+
+#### 🔧 GCP Configuration
+| Setting | Value |
+|---------|-------|
+| Project | `flysolo-video-test` |
+| Service Account | `veo-video@flysolo-video-test.iam.gserviceaccount.com` |
+| Role | `roles/aiplatform.user` |
+| API | Vertex AI |
+| Billing | Enabled |
+
+---
+
 ### Session: 17 December 2025 (Late Night) — Critical Analysis Fix & Fallback
 **Duration**: ~1 hour
 **Focus**: Diagnosing production errors and implementing robust fallbacks
