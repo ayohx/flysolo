@@ -1,4 +1,5 @@
 import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
+import { GoogleAuth } from "google-auth-library";
 
 interface VideoRequest {
   imageBase64?: string;
@@ -8,19 +9,31 @@ interface VideoRequest {
 }
 
 /**
- * VEO Video Generation Serverless Function
+ * VEO Video Generation Serverless Function (Vertex AI)
  * 
- * Supports two modes:
- * 1. IMAGE-TO-VIDEO: Animates a source image (recommended for consistent results)
- *    - Passes the exact image the user sees on the card
- *    - Uses the image as the "first frame" and animates it
+ * Uses Vertex AI API for proper image-to-video support.
+ * This bypasses CORS issues and uses the correct API format.
  * 
- * 2. TEXT-TO-VIDEO: Creates video from text prompt only (fallback)
+ * Modes:
+ * 1. IMAGE-TO-VIDEO: Animates the source image (first frame = source image)
+ * 2. TEXT-TO-VIDEO: Creates video from text prompt (fallback)
  * 
- * API: Uses Google Generative Language API with VEO 2.0
- * (VEO 2.0 is more stable for image-to-video than VEO 3.0)
+ * Authentication: Service Account with Vertex AI User role
  */
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
+  // Handle CORS preflight
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      },
+      body: "",
+    };
+  }
+
   // Only allow POST
   if (event.httpMethod !== "POST") {
     return {
@@ -41,103 +54,99 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       event.body || "{}"
     ) as VideoRequest;
 
-    // Try primary VEO key first, then fallback
-    const apiKey = process.env.VEO_API_KEY || process.env.VITE_VEO_API_KEY || process.env.API_KEY;
-
-    if (!apiKey) {
-      console.error("VEO_API_KEY not configured");
+    // Get GCP credentials from environment
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
+    const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+    
+    if (!projectId || !serviceAccountKey) {
+      console.error("❌ Missing GCP credentials");
+      console.error(`   Project ID: ${projectId ? "✓" : "✗"}`);
+      console.error(`   Service Account Key: ${serviceAccountKey ? "✓" : "✗"}`);
       return {
         statusCode: 500,
         headers,
-        body: JSON.stringify({ error: "VEO API key not configured" }),
+        body: JSON.stringify({ 
+          error: "GCP credentials not configured",
+          details: "Missing GOOGLE_CLOUD_PROJECT_ID or GOOGLE_SERVICE_ACCOUNT_KEY"
+        }),
       };
     }
 
-    // Build request body based on whether we have an image
-    // VEO 2.0 image-to-video uses a specific format with the image as first frame
+    // Parse service account credentials
+    let credentials;
+    try {
+      credentials = JSON.parse(serviceAccountKey);
+    } catch (parseError) {
+      console.error("❌ Failed to parse service account key:", parseError);
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ error: "Invalid service account key format" }),
+      };
+    }
+
+    // Create Google Auth client with service account
+    const auth = new GoogleAuth({
+      credentials: credentials,
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    });
+
+    // Get access token
+    const accessToken = await auth.getAccessToken();
+    if (!accessToken) {
+      console.error("❌ Failed to get access token");
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ error: "Failed to authenticate with GCP" }),
+      };
+    }
+
+    console.log("✅ GCP authentication successful");
+    
+    // Duration in seconds (VEO supports 5-8 seconds)
+    const durationSeconds = duration === "5s" ? 5 : 8;
+    
+    // Vertex AI endpoint for VEO
+    // Using veo-2.0-generate-001 for image-to-video stability
+    const location = "us-central1";
+    const model = "veo-2.0-generate-001";
+    const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predictLongRunning`;
+
     let requestBody: any;
     
-    // VEO 2.0 supports 5-10 seconds, VEO 3.0 supports 4-8 seconds
-    // Using VEO 2.0 for better image-to-video support
-    const durationSeconds = duration === "5s" ? 5 : 8;
-
     if (imageBase64 && mimeType) {
-      // IMAGE-TO-VIDEO mode - animate the EXACT source image
-      console.log("🎬 IMAGE-TO-VIDEO mode - animating source image...");
-      console.log(`   Image size: ${Math.round(imageBase64.length / 1024)}KB, Type: ${mimeType}`);
+      // IMAGE-TO-VIDEO mode - Vertex AI format
+      console.log("🎬 IMAGE-TO-VIDEO mode via Vertex AI");
+      console.log(`   Image size: ${Math.round(imageBase64.length / 1024)}KB`);
+      console.log(`   MIME type: ${mimeType}`);
       console.log(`   Motion prompt: ${motionPrompt.substring(0, 100)}...`);
+      console.log(`   Duration: ${durationSeconds}s`);
       
-      // VEO 2.0 image-to-video format according to Generative Language API docs
-      // The image is passed as the reference/starting frame
       requestBody = {
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                inlineData: {
-                  mimeType: mimeType,
-                  data: imageBase64,
-                },
-              },
-              {
-                text: motionPrompt,
-              },
-            ],
+        instances: [{
+          prompt: motionPrompt,
+          image: {
+            bytesBase64Encoded: imageBase64,
+            mimeType: mimeType,
           },
-        ],
-        generationConfig: {
-          responseModalities: ["VIDEO"],
-          videoConfig: {
-            aspectRatio: "9:16",
-            numberOfVideos: 1,
-            durationSeconds: durationSeconds,
-            personGeneration: "dont_allow",
-          },
+        }],
+        parameters: {
+          aspectRatio: "9:16",
+          sampleCount: 1,
+          durationSeconds: durationSeconds,
+          personGeneration: "dont_allow",
         },
       };
     } else {
-      // TEXT-TO-VIDEO mode (no source image)
-      console.log("📝 TEXT-TO-VIDEO mode...");
+      // TEXT-TO-VIDEO mode
+      console.log("📝 TEXT-TO-VIDEO mode via Vertex AI");
+      console.log(`   Prompt: ${motionPrompt.substring(0, 100)}...`);
+      
       requestBody = {
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: motionPrompt,
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          responseModalities: ["VIDEO"],
-          videoConfig: {
-            aspectRatio: "9:16",
-            numberOfVideos: 1,
-            durationSeconds: durationSeconds,
-            personGeneration: "dont_allow",
-          },
-        },
-      };
-    }
-
-    console.log("📤 Sending request to VEO API...");
-
-    // Use generateContent endpoint which supports multimodal input
-    // For pure video generation, we need the video model endpoint
-    const endpoint = imageBase64 
-      ? `https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:generateContent?key=${apiKey}`
-      : `https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:generateVideo?key=${apiKey}`;
-    
-    // If text-only, use the older format that works
-    if (!imageBase64) {
-      requestBody = {
-        instances: [
-          {
-            prompt: motionPrompt,
-          },
-        ],
+        instances: [{
+          prompt: motionPrompt,
+        }],
         parameters: {
           aspectRatio: "9:16",
           sampleCount: 1,
@@ -147,9 +156,12 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       };
     }
 
+    console.log(`📤 Sending request to Vertex AI: ${endpoint}`);
+
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
+        "Authorization": `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(requestBody),
@@ -157,70 +169,38 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("❌ VEO API error:", response.status, errorText);
+      console.error("❌ Vertex AI error:", response.status, errorText);
       
-      // If image-to-video fails, try alternative VEO endpoint
-      if (imageBase64) {
-        console.log("🔄 Trying alternative image-to-video endpoint...");
-        
-        const altRequestBody = {
-          instances: [
-            {
-              prompt: motionPrompt,
-              image: {
-                bytesBase64Encoded: imageBase64,
-                mimeType: mimeType,
-              },
-            },
-          ],
-          parameters: {
-            aspectRatio: "9:16",
-            sampleCount: 1,
-            durationSeconds: durationSeconds,
-            personGeneration: "dont_allow",
-          },
-        };
-        
-        const altResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:generateVideo?key=${apiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(altRequestBody),
-          }
-        );
-        
-        if (altResponse.ok) {
-          const altResult = await altResponse.json();
-          console.log("✅ Alternative VEO endpoint success:", altResult.name);
-          return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify(altResult),
-          };
-        }
-        
-        const altErrorText = await altResponse.text();
-        console.error("❌ Alternative endpoint also failed:", altResponse.status, altErrorText);
-      }
+      // Parse error for better debugging
+      let errorDetails = errorText;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorDetails = errorJson.error?.message || errorText;
+      } catch {}
       
       return {
         statusCode: response.status,
         headers,
         body: JSON.stringify({
-          error: `VEO API error: ${response.status}`,
-          details: errorText,
+          error: `Vertex AI error: ${response.status}`,
+          details: errorDetails,
         }),
       };
     }
 
     const result = await response.json();
-    console.log("✅ VEO API success:", result.name || "Response received");
+    console.log("✅ Vertex AI request accepted");
+    console.log("   Operation:", result.name);
 
+    // Return the operation name for status polling
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify(result),
+      body: JSON.stringify({
+        name: result.name,
+        done: result.done || false,
+        metadata: result.metadata,
+      }),
     };
   } catch (error: any) {
     console.error("❌ Function error:", error);
@@ -236,4 +216,3 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
 };
 
 export { handler };
-

@@ -1832,153 +1832,18 @@ export const generatePostVideo = async (
     }
   };
 
-  // Helper function to attempt video generation with a specific client
-  // Supports both IMAGE-TO-VIDEO (animate exact source image) and TEXT-TO-VIDEO
-  const tryGenerateVideo = async (clientGetter: () => GoogleGenAI, useImageToVideo: boolean = true) => {
+  // Helper function for TEXT-TO-VIDEO only (SDK based)
+  // Used ONLY when there is NO source image
+  const tryTextToVideo = async (clientGetter: () => GoogleGenAI) => {
     const client = clientGetter();
-    const veoApiKey = process.env.VEO_API_KEY || process.env.API_KEY;
-    
-    // If we have a source image AND image-to-video is enabled, use IMAGE-TO-VIDEO mode
-    // This animates the EXACT image the user sees on the card
-    let imageBase64: string | undefined;
-    let mimeType: string = 'image/png';
-    
-    if (useImageToVideo && sourceImage) {
-      console.log("🖼️ Source image provided for animation:", sourceImage.substring(0, 50) + "...");
-      
-      if (sourceImage.startsWith('data:image/')) {
-        // Already base64 - extract the data
-        const matches = sourceImage.match(/^data:(image\/\w+);base64,(.+)$/);
-        if (matches) {
-          mimeType = matches[1];
-          imageBase64 = matches[2];
-          console.log(`📷 Extracted base64 image: ${mimeType}, ${Math.round(imageBase64.length / 1024)}KB`);
-        }
-      } else if (sourceImage.startsWith('http')) {
-        // URL - convert to base64
-        console.log("🔄 Converting URL to base64 for image-to-video...");
-        const converted = await urlToBase64(sourceImage);
-        if (converted) {
-          imageBase64 = converted.base64;
-          mimeType = converted.mimeType;
-          console.log(`📷 Converted URL to base64: ${mimeType}, ${Math.round(imageBase64.length / 1024)}KB`);
-        }
-      }
-    }
-    
-    // VEO 2.0 is more reliable for image-to-video than VEO 3.0
-    // VEO 2.0: 5-10 seconds, VEO 3.0: 4-8 seconds
     const durationSeconds = duration === "5s" ? 5 : 8;
     
-    if (useImageToVideo && imageBase64) {
-      console.log("🎬 IMAGE-TO-VIDEO mode - animating the EXACT source image...");
-      console.log("📝 Motion prompt:", imageToVideoPrompt);
-      console.log(`📏 Duration: ${durationSeconds}s`);
-      
-      // Try multiple API formats for image-to-video
-      // Format 1: VEO 2.0 with instances/parameters (Vertex AI style)
-      const format1RequestBody = {
-        instances: [{
-          prompt: imageToVideoPrompt,
-          image: {
-            bytesBase64Encoded: imageBase64,
-            mimeType: mimeType,
-          },
-        }],
-        parameters: {
-          aspectRatio: "9:16",
-          sampleCount: 1,
-          durationSeconds: durationSeconds,
-          personGeneration: "dont_allow",
-        },
-      };
-      
-      console.log("📤 Attempting VEO 2.0 image-to-video (format 1)...");
-      
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:generateVideo?key=${veoApiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(format1RequestBody),
-          }
-        );
-        
-        if (response.ok) {
-          const result = await response.json();
-          console.log("✅ Image-to-video (format 1) accepted:", result.name || "success");
-          return result;
-        }
-        
-        const errorText = await response.text();
-        console.warn("⚠️ Format 1 failed:", response.status, errorText.substring(0, 200));
-      } catch (err: any) {
-        console.warn("⚠️ Format 1 error:", err.message);
-      }
-      
-      // Format 2: VEO 3.0 with contents/generationConfig (Gemini style)
-      console.log("📤 Attempting VEO 3.0 image-to-video (format 2)...");
-      const format2RequestBody = {
-        contents: [{
-          role: "user",
-          parts: [
-            {
-              inlineData: {
-                mimeType: mimeType,
-                data: imageBase64,
-              },
-            },
-            {
-              text: imageToVideoPrompt,
-            },
-          ],
-        }],
-        generationConfig: {
-          responseModalities: ["VIDEO"],
-          videoConfig: {
-            aspectRatio: "9:16",
-            numberOfVideos: 1,
-            durationSeconds: durationSeconds,
-            personGeneration: "dont_allow",
-          },
-        },
-      };
-      
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:generateContent?key=${veoApiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(format2RequestBody),
-          }
-        );
-        
-        if (response.ok) {
-          const result = await response.json();
-          console.log("✅ Image-to-video (format 2) accepted:", result.name || "success");
-          return result;
-        }
-        
-        const errorText = await response.text();
-        console.warn("⚠️ Format 2 failed:", response.status, errorText.substring(0, 200));
-      } catch (err: any) {
-        console.warn("⚠️ Format 2 error:", err.message);
-      }
-      
-      // If both image-to-video formats fail, fall back to text-to-video
-      console.warn("⚠️ All image-to-video formats failed - falling back to text-to-video...");
-      console.warn("💡 Note: The generated video may not match the exact source image.");
-    }
-    
-    // TEXT-TO-VIDEO mode (no source image, or image-to-video failed)
-    console.log("📝 TEXT-TO-VIDEO mode...");
+    console.log("📝 TEXT-TO-VIDEO mode (no source image)...");
     console.log("📝 Text prompt:", textToVideoPrompt.substring(0, 200) + "...");
     
-    // Use SDK for text-to-video (more reliable)
+    // Use SDK for text-to-video
     const response = await client.models.generateVideos({
-      model: "veo-2.0-generate-001", // VEO 2.0 for stability
+      model: "veo-2.0-generate-001",
       prompt: textToVideoPrompt,
       config: {
         aspectRatio: "9:16",
@@ -1991,14 +1856,15 @@ export const generatePostVideo = async (
   };
 
   try {
-    const mode = sourceImage ? 'IMAGE-TO-VIDEO' : 'TEXT-TO-VIDEO';
-    console.log(`🎬 Starting VEO 2.0 video generation (${mode})...`);
+    const mode = sourceImage ? 'IMAGE-TO-VIDEO (Vertex AI)' : 'TEXT-TO-VIDEO (SDK)';
+    console.log(`🎬 Starting VEO video generation: ${mode}`);
     
     let result;
     
-    // In production (Netlify), use serverless function for CORS-free API calls
-    if (isNetlify && sourceImage) {
-      console.log("🌐 Production detected - using Netlify serverless function...");
+    // IMAGE-TO-VIDEO: ALWAYS use Netlify serverless function (routes to Vertex AI)
+    // This is the ONLY reliable way to do image-to-video
+    if (sourceImage) {
+      console.log("🌐 Using Netlify serverless function → Vertex AI for image-to-video...");
       
       // Convert source image to base64 if needed
       let imageBase64: string | undefined;
@@ -2009,40 +1875,51 @@ export const generatePostVideo = async (
         if (matches) {
           mimeType = matches[1];
           imageBase64 = matches[2];
+          console.log(`📷 Extracted base64: ${mimeType}, ${Math.round(imageBase64.length / 1024)}KB`);
         }
       } else if (sourceImage.startsWith('http')) {
+        console.log("🔄 Converting URL to base64...");
         const converted = await urlToBase64(sourceImage);
         if (converted) {
           imageBase64 = converted.base64;
           mimeType = converted.mimeType;
+          console.log(`📷 Converted: ${mimeType}, ${Math.round(imageBase64.length / 1024)}KB`);
         }
+      }
+      
+      if (!imageBase64) {
+        console.error("❌ Failed to extract/convert image to base64");
+        return { 
+          status: 'failed', 
+          failureReason: 'Could not process source image for video generation' 
+        };
       }
       
       try {
         result = await tryNetlifyFunction(imageBase64, mimeType);
       } catch (netlifyError: any) {
-        console.warn("⚠️ Netlify function failed:", netlifyError.message);
-        // Fall back to SDK
-        result = await tryGenerateVideo(getVideoClient, true);
+        console.error("❌ Netlify/Vertex AI function failed:", netlifyError.message);
+        return { 
+          status: 'failed', 
+          failureReason: `Image-to-video failed: ${netlifyError.message}. Check Vertex AI credentials.` 
+        };
       }
     } else {
-      // Development or no source image - use SDK directly
+      // TEXT-TO-VIDEO: No source image - use SDK directly
+      console.log("📝 No source image - using text-to-video via SDK...");
       try {
-        result = await tryGenerateVideo(getVideoClient, true);
+        result = await tryTextToVideo(getVideoClient);
       } catch (primaryError: any) {
         console.warn("⚠️ Primary VEO key failed:", primaryError.message);
         
-        // Try backup key
         try {
           console.log("🔄 Trying backup VEO key...");
-          result = await tryGenerateVideo(getVideoBackupClient, true);
+          result = await tryTextToVideo(getVideoBackupClient);
         } catch (backupError: any) {
           console.error("❌ Backup key also failed:", backupError.message);
-          
-          // Return detailed failure reason
           return { 
             status: 'failed', 
-            failureReason: `Image-to-video generation failed. VEO may not support this image format or the API structure has changed. Error: ${backupError.message}` 
+            failureReason: `Text-to-video failed: ${backupError.message}` 
           };
         }
       }

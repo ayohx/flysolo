@@ -16,6 +16,14 @@ build/
 .env.test.local
 .env.production.local
 
+# GCP Service Account Keys (NEVER commit these!)
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.node.json
+services/*-*.json
+
 # IDE and editor files
 .vscode/
 .idea/
