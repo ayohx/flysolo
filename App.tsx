@@ -399,19 +399,29 @@ function App() {
       // We just need to add it to pendingAnalyses and navigate away
       const normalisedUrl = normaliseUrl(currentAnalysisUrl);
       
+      // Extract a friendly brand name from the URL domain
+      const urlDomain = normalisedUrl.replace(/^www\./, '').split('/')[0];
+      const friendlyName = urlDomain.split('.')[0].charAt(0).toUpperCase() + urlDomain.split('.')[0].slice(1);
+      
       // Add to pending with 'analysing' status since it's already started
+      // If we have a brand profile already (stage 1 complete), use its name
       setPendingAnalyses(prev => new Map(prev).set(normalisedUrl, {
         id: crypto.randomUUID(),
         url: normalisedUrl,
+        brandName: brandProfile?.name || friendlyName,
         status: 'analysing',
-        progress: 25, // Approximate progress
+        progress: brandProfile ? 50 : 25, // More progress if we already have profile
         startedAt: new Date(),
+        profile: brandProfile || undefined, // Include if available
       }));
+      
+      // Show toast confirming background mode
+      toast.info(`Analysing ${brandProfile?.name || friendlyName} in the background...`);
       
       // Navigate to brand selector
       setAppState(AppState.BRAND_SELECTOR);
     }
-  }, [currentAnalysisUrl]);
+  }, [currentAnalysisUrl, brandProfile, toast]);
 
   // Reset analysis stages when returning to onboarding
   const resetAnalysisStages = () => {
@@ -489,35 +499,66 @@ function App() {
       // Clear current analysis URL
       setCurrentAnalysisUrl(null);
       
-      // If there was a pending analysis for this URL, complete it
-      if (pendingAnalyses.has(normalisedUrl)) {
+      // Check if user moved analysis to background (not on ANALYZING screen anymore)
+      // We need to check the ACTUAL current state, not a stale closure value
+      const wasMovedToBackground = pendingAnalyses.has(normalisedUrl);
+      
+      if (wasMovedToBackground) {
+        // User clicked "Continue in Background" - update pending and show notification
         updatePendingStatus(normalisedUrl, 'complete', { profile, posts });
+        
+        // Show toast notification
+        addNotification({
+          type: 'analysis_complete',
+          title: `${profile.name} is ready!`,
+          message: 'Tap to view your brand DNA and content ideas.',
+          brandUrl: normalisedUrl,
+        });
+        
+        // Don't navigate - user is viewing brand selector or adding another brand
+        console.log('✅ Background analysis complete for:', profile.name);
+      } else {
+        // User stayed on the analysis screen - navigate to swiping
+        setAppState(AppState.SWIPING);
       }
-
-      setAppState(AppState.SWIPING);
       
     } catch (error: any) {
       console.error("Analysis failed:", error);
       
-      // Mark stages as error
+      // Check if user moved to background
+      const wasMovedToBackground = pendingAnalyses.has(normalisedUrl);
+      
+      // Mark stages as error (only relevant if user is still viewing)
       setAnalysisStages(prev => prev.map(s => 
         s.status === 'loading' ? { ...s, status: 'error' } : s
       ));
       
-      // Update pending analysis if it exists
-      if (pendingAnalyses.has(normalisedUrl)) {
+      if (wasMovedToBackground) {
+        // Update pending analysis status
         updatePendingStatus(normalisedUrl, 'error', { 
           error: error.message || 'Analysis failed' 
         });
+        
+        // Show error notification
+        addNotification({
+          type: 'analysis_failed',
+          title: 'Analysis failed',
+          message: error.message || 'Could not analyse brand.',
+          brandUrl: normalisedUrl,
+        });
+        
+        // Don't navigate - user is elsewhere
+        console.error('❌ Background analysis failed for:', normalisedUrl);
+      } else {
+        // User is still on analysis screen - show error and go back to onboarding
+        setAnalysisError(error.message || "Analysis failed. Please try again.");
+        
+        setTimeout(() => {
+          setAppState(AppState.ONBOARDING);
+        }, 2000);
       }
       
-      // Set error message and return to onboarding after delay
-      setAnalysisError(error.message || "Analysis failed. Please try again.");
       setCurrentAnalysisUrl(null);
-      
-      setTimeout(() => {
-        setAppState(AppState.ONBOARDING);
-      }, 2000);
     }
   };
 
