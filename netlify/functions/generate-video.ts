@@ -114,19 +114,17 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       
       const location = "us-central1";
       
-      // VEO operations use the fetchPredictOperation endpoint
-      // The operationName is like "projects/xxx/locations/xxx/publishers/google/models/xxx/operations/xxx"
-      const statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}:fetchPredictOperation`;
+      // VEO uses standard operations.get endpoint for status
+      // operationName is like "projects/xxx/locations/xxx/publishers/google/models/xxx/operations/xxx"
+      const statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
       
       console.log("📡 Status endpoint:", statusEndpoint);
       
       const statusResponse = await fetch(statusEndpoint, {
-        method: "POST",  // fetchPredictOperation uses POST
+        method: "GET",  // Standard GET for operation status
         headers: {
           "Authorization": `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
         },
-        body: JSON.stringify({}),  // Empty body required
       });
       
       if (!statusResponse.ok) {
