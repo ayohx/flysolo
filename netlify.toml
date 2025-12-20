@@ -6,14 +6,9 @@
 [build.environment]
   NODE_VERSION = "18"
 
-# CRITICAL: Exclude Netlify functions from SPA redirect
-# This MUST come BEFORE the catch-all SPA redirect
-[[redirects]]
-  from = "/.netlify/functions/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-
 # Handle SPA routing for frontend
+# NOTE: Netlify automatically excludes /.netlify/* paths from redirects
+# so the functions endpoint will work correctly
 [[redirects]]
   from = "/*"
   to = "/index.html"
