@@ -138,6 +138,7 @@ export const listBrands = async (filter: 'active' | 'archived' | 'all' = 'active
   const client = getSupabase();
   
   try {
+    // First, try with status filter (for databases with status column)
     let query = client
       .from('brands')
       .select('*')
@@ -152,7 +153,29 @@ export const listBrands = async (filter: 'active' | 'archived' | 'all' = 'active
     }
     // 'all' = no filter
     
-    const { data, error } = await query;
+    let { data, error } = await query;
+    
+    // Handle case where 'status' column doesn't exist yet (code 42703)
+    if (error && (error.code === '42703' || error.message?.includes('status does not exist'))) {
+      console.warn('⚠️ Status column not found, falling back to unfiltered query');
+      
+      // Retry without status filter
+      const fallbackResult = await client
+        .from('brands')
+        .select('*')
+        .order('updated_at', { ascending: false });
+      
+      if (fallbackResult.error) {
+        console.error('Failed to list brands (fallback):', fallbackResult.error);
+        return [];
+      }
+      
+      // Return all brands as 'active' since there's no status column
+      return (fallbackResult.data || []).map(brand => ({
+        ...brand,
+        status: 'active' as BrandStatus,
+      })) as StoredBrand[];
+    }
     
     if (error) {
       console.error('Failed to list brands:', error);
@@ -172,6 +195,7 @@ export const listBrands = async (filter: 'active' | 'archived' | 'all' = 'active
 
 /**
  * Archive a brand (soft delete - can be restored)
+ * Note: Requires 'status' column in database. Will fail gracefully if column doesn't exist.
  */
 export const archiveBrand = async (brandId: string): Promise<boolean> => {
   const client = getSupabase();
@@ -183,6 +207,12 @@ export const archiveBrand = async (brandId: string): Promise<boolean> => {
       .eq('id', brandId);
     
     if (error) {
+      // Handle missing status column gracefully
+      if (error.code === '42703' || error.message?.includes('status')) {
+        console.warn('⚠️ Archive not available - status column missing from database');
+        alert('Archive feature not available. Please ask admin to add status column to database.');
+        return false;
+      }
       console.error('Failed to archive brand:', error);
       return false;
     }
@@ -197,6 +227,7 @@ export const archiveBrand = async (brandId: string): Promise<boolean> => {
 
 /**
  * Restore an archived brand
+ * Note: Requires 'status' column in database.
  */
 export const restoreBrand = async (brandId: string): Promise<boolean> => {
   const client = getSupabase();
@@ -208,6 +239,11 @@ export const restoreBrand = async (brandId: string): Promise<boolean> => {
       .eq('id', brandId);
     
     if (error) {
+      // Handle missing status column gracefully
+      if (error.code === '42703' || error.message?.includes('status')) {
+        console.warn('⚠️ Restore not available - status column missing from database');
+        return false;
+      }
       console.error('Failed to restore brand:', error);
       return false;
     }
