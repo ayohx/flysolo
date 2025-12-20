@@ -14,14 +14,14 @@ import { analyzeBrand, generateContentIdeas, generatePostImage, generatePostImag
 import { saveBrand, saveBrandAssets, getBrandByUrl, findRelevantAsset, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
 import { Plus, X, Home, ArrowLeft } from 'lucide-react';
 
-// LocalStorage keys
+// LocalStorage keys - MINIMAL storage only (no large data!)
 const STORAGE_KEYS = {
-  BRAND_PROFILE: 'flysolo_brand_profile',
-  GENERATED_POSTS: 'flysolo_generated_posts',
-  LIKED_POSTS: 'flysolo_liked_posts',
-  APP_STATE: 'flysolo_app_state',
-  PENDING_ANALYSES: 'flysolo_pending_analyses',
-  NOTIFICATIONS: 'flysolo_notifications',
+  // Lightweight keys only - IDs and state strings
+  CURRENT_BRAND_ID: 'flysolo_current_brand_id',  // Just the UUID
+  APP_STATE: 'flysolo_app_state',                // Just the state string
+  PENDING_ANALYSES: 'flysolo_pending_analyses',  // Lightweight analysis tracking
+  NOTIFICATIONS: 'flysolo_notifications',        // Small notification objects
+  // REMOVED: brand_profile, generated_posts, liked_posts (use Supabase instead)
 };
 
 // Helper to normalise URLs for consistent tracking
@@ -54,106 +54,109 @@ function App() {
   // Error handling state
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   
-  // Restore state from localStorage on mount
+  // Restore state from Supabase on mount (localStorage only for lightweight data)
   useEffect(() => {
-    const savedProfile = loadFromStorage<BrandProfile | null>(STORAGE_KEYS.BRAND_PROFILE, null);
-    const savedPosts = loadFromStorage<SocialPost[]>(STORAGE_KEYS.GENERATED_POSTS, []);
-    const savedLiked = loadFromStorage<SocialPost[]>(STORAGE_KEYS.LIKED_POSTS, []);
-    const savedState = loadFromStorage<string>(STORAGE_KEYS.APP_STATE, AppState.ONBOARDING);
-    
-    console.log('LocalStorage check:', { savedState, SWIPING: AppState.SWIPING, hasProfile: !!savedProfile, postCount: savedPosts.length });
-    if (savedProfile && savedPosts.length > 0) {
-      console.log('Restoring from localStorage:', { profile: savedProfile.name, posts: savedPosts.length, state: savedState });
-      setBrandProfile(savedProfile);
-      setGeneratedPosts(savedPosts);
-      setLikedPosts(savedLiked);
-      // Only restore SWIPING or DASHBOARD states
-      if (savedState === AppState.SWIPING || savedState === AppState.DASHBOARD) {
-        console.log('Setting appState to:', savedState);
-        setAppState(savedState as AppState);
-      } else {
-        // Profile exists but state wasn't saved - go to swiping
-        console.log('Defaulting to SWIPING');
-        setAppState(AppState.SWIPING);
-      }
-    }
-    setIsHydrated(true);
-  }, []);
-  
-  // Helper to safely save to localStorage with quota handling
-  const safeLocalStorageSet = (key: string, value: string) => {
-    try {
-      localStorage.setItem(key, value);
-    } catch (e: any) {
-      if (e.name === 'QuotaExceededError') {
-        console.warn('⚠️ LocalStorage quota exceeded, clearing old data...');
-        // Clear large data to make room
-        localStorage.removeItem(STORAGE_KEYS.GENERATED_POSTS);
-        localStorage.removeItem(STORAGE_KEYS.LIKED_POSTS);
-        // Try again with cleared storage
+    const initializeApp = async () => {
+      // Get lightweight state from localStorage
+      const savedBrandId = loadFromStorage<string | null>(STORAGE_KEYS.CURRENT_BRAND_ID, null);
+      const savedState = loadFromStorage<string>(STORAGE_KEYS.APP_STATE, AppState.ONBOARDING);
+      
+      console.log('🔄 App init - brandId:', savedBrandId, 'state:', savedState);
+      
+      // If we have a saved brand ID, load from Supabase
+      if (savedBrandId) {
         try {
-          localStorage.setItem(key, value);
-        } catch {
-          console.error('❌ LocalStorage still full after clearing');
+          // Load brand workspace from Supabase (profile + saved posts)
+          const workspace = await loadBrandWorkspace(savedBrandId);
+          
+          if (workspace) {
+            console.log('✅ Loaded from Supabase:', workspace.brand.name, 'with', workspace.savedPosts.length, 'saved posts');
+            setBrandProfile(workspace.brand.profile_json);
+            setCurrentBrandId(savedBrandId);
+            setLikedPosts(workspace.savedPosts);
+            
+            // Generate fresh content for this session (not from storage)
+            // This will be triggered when we enter SWIPING state
+            if (savedState === AppState.SWIPING || savedState === AppState.DASHBOARD) {
+              setAppState(savedState as AppState);
+              
+              // Auto-generate content if we're in swiping mode but have no posts
+              if (savedState === AppState.SWIPING) {
+                console.log('🎨 Generating fresh content for session...');
+                const posts = await generateContentIdeas(workspace.brand.profile_json, 10);
+                setGeneratedPosts(posts);
+                startImageGeneration(posts.slice(0, 10), workspace.brand.profile_json, savedBrandId);
+              }
+            } else {
+              setAppState(AppState.SWIPING);
+              const posts = await generateContentIdeas(workspace.brand.profile_json, 10);
+              setGeneratedPosts(posts);
+              startImageGeneration(posts.slice(0, 10), workspace.brand.profile_json, savedBrandId);
+            }
+          } else {
+            // Brand not found in Supabase, check if we have brands at all
+            const brands = await listBrands();
+            if (brands.length > 0) {
+              setAppState(AppState.BRAND_SELECTOR);
+            } else {
+              setAppState(AppState.ONBOARDING);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to load from Supabase:', e);
+          // Fallback to brand selector
+          const brands = await listBrands();
+          if (brands.length > 0) {
+            setAppState(AppState.BRAND_SELECTOR);
+          }
         }
       } else {
-        console.error('LocalStorage error:', e);
+        // No saved brand - check if we have any brands in Supabase
+        const brands = await listBrands();
+        setAllBrands(brands);
+        if (brands.length > 0) {
+          setAppState(AppState.BRAND_SELECTOR);
+        }
       }
-    }
-  };
+      
+      setIsHydrated(true);
+    };
+    
+    initializeApp();
+  }, []);
   
-  // Strip base64 images from posts before saving (they're too large for localStorage)
-  const stripBase64Images = (posts: SocialPost[]): SocialPost[] => {
-    return posts.map(post => ({
-      ...post,
-      // Only keep URL-based images, not base64
-      imageUrl: post.imageUrl?.startsWith('data:') ? undefined : post.imageUrl,
-    }));
-  };
-  
-  // Save to localStorage when state changes
+  // Save ONLY lightweight data to localStorage (IDs and state strings)
+  // All heavy data (posts, images) goes to Supabase
   useEffect(() => {
-    if (!isHydrated) return; // Don't save during initial hydration
-    if (brandProfile) {
-      // Strip large image arrays from profile before saving
-      const lightProfile = {
-        ...brandProfile,
-        imageAssets: brandProfile.imageAssets?.slice(0, 5), // Keep only first 5
-      };
-      safeLocalStorageSet(STORAGE_KEYS.BRAND_PROFILE, JSON.stringify(lightProfile));
+    if (!isHydrated) return;
+    // Save current brand ID (just a UUID string - tiny)
+    if (currentBrandId) {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_BRAND_ID, currentBrandId);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_BRAND_ID);
     }
-  }, [brandProfile, isHydrated]);
+  }, [currentBrandId, isHydrated]);
   
   useEffect(() => {
     if (!isHydrated) return;
-    if (generatedPosts.length > 0) {
-      // Strip base64 images and limit to 20 posts max
-      const postsToSave = stripBase64Images(generatedPosts.slice(0, 20));
-      safeLocalStorageSet(STORAGE_KEYS.GENERATED_POSTS, JSON.stringify(postsToSave));
-    }
-  }, [generatedPosts, isHydrated]);
-  
-  useEffect(() => {
-    if (!isHydrated) return;
-    // Strip base64 images from liked posts too
-    const likedToSave = stripBase64Images(likedPosts.slice(0, 50));
-    safeLocalStorageSet(STORAGE_KEYS.LIKED_POSTS, JSON.stringify(likedToSave));
-  }, [likedPosts, isHydrated]);
-  
-  useEffect(() => {
-    if (!isHydrated) return;
+    // Save app state (just a string - tiny)
     if (appState === AppState.SWIPING || appState === AppState.DASHBOARD) {
-      safeLocalStorageSet(STORAGE_KEYS.APP_STATE, appState);
+      localStorage.setItem(STORAGE_KEYS.APP_STATE, appState);
     }
   }, [appState, isHydrated]);
   
+  // NOTE: generatedPosts are NOT saved to localStorage or Supabase
+  // They are regenerated fresh each session for better performance
+  // Only likedPosts are saved to Supabase (see handleLike function)
+  
   // Clear all saved data and start fresh
   const handleStartFresh = () => {
-    localStorage.removeItem(STORAGE_KEYS.BRAND_PROFILE);
-    localStorage.removeItem(STORAGE_KEYS.GENERATED_POSTS);
-    localStorage.removeItem(STORAGE_KEYS.LIKED_POSTS);
+    // Clear lightweight localStorage keys
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_BRAND_ID);
     localStorage.removeItem(STORAGE_KEYS.APP_STATE);
+    // Clear React state
     setBrandProfile(null);
+    setCurrentBrandId(null);
     setGeneratedPosts([]);
     setLikedPosts([]);
     setAppState(AppState.ONBOARDING);
