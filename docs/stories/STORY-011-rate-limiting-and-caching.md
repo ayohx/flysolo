@@ -84,6 +84,13 @@ CREATE TABLE IF NOT EXISTS brand_content_cache (
 -- Index for efficient lookups and cleanup
 CREATE INDEX IF NOT EXISTS idx_content_cache_brand_id ON brand_content_cache(brand_id);
 CREATE INDEX IF NOT EXISTS idx_content_cache_expires ON brand_content_cache(expires_at);
+
+-- Enable Row Level Security (required for Supabase access)
+ALTER TABLE brand_content_cache ENABLE ROW LEVEL SECURITY;
+
+-- Allow all operations (public access like other tables)
+CREATE POLICY "Allow all operations on brand_content_cache" ON brand_content_cache
+  FOR ALL USING (true) WITH CHECK (true);
 ```
 
 ## How It Works Now
