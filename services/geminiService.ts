@@ -1062,29 +1062,21 @@ TECHNICAL REQUIREMENTS:
   
   console.log('📝 Final Imagen prompt (first 300 chars):', finalPrompt.substring(0, 300) + '...');
 
-  // Collect ALL available API keys (using existing env vars)
-  // Remove duplicates and empty values
-  const allApiKeys = [
-    process.env.API_KEY,
-    process.env.IMAGEN_API_KEY,
-    process.env.VEO_API_KEY,
-    process.env.VEO_API_KEY_2,
-  ];
+  // Use ONLY the dedicated IMAGEN_API_KEY for image generation
+  // This prevents accidentally using other API keys that may be rate-limited
+  const imagenApiKey = process.env.IMAGEN_API_KEY;
   
-  const uniqueApiKeys = allApiKeys.filter((key, index, arr) => {
-    return key && key.length > 0 && arr.indexOf(key) === index;
-  }) as string[];
+  if (!imagenApiKey) {
+    console.error('❌ No IMAGEN_API_KEY configured - falling back to placeholder');
+    return getBrandedPlaceholderImage(safeProfile, visualPrompt);
+  }
+  
+  const uniqueApiKeys = [imagenApiKey];
 
-  // Log API key availability for debugging
-  console.log('🔑 API Key Status:', {
-    hasApiKey: !!process.env.API_KEY,
-    hasImagenKey: !!process.env.IMAGEN_API_KEY,
-    hasVeoKey: !!process.env.VEO_API_KEY,
-    hasVeoKey2: !!process.env.VEO_API_KEY_2,
-    uniqueKeyCount: uniqueApiKeys.length,
-  });
+  // Log API key for debugging (first 10 chars only)
+  console.log('🔑 Imagen API Key:', imagenApiKey.substring(0, 10) + '...');
   
-  console.log(`🖼️ Attempting Imagen 3 image generation with ${uniqueApiKeys.length} API keys...`);
+  console.log('🖼️ Attempting Imagen image generation...');
 
   // Imagen model candidates to try with each key (ordered by preference)
   // Updated: Imagen 4.0 is now the latest, Imagen 3.0 has been deprecated
@@ -1289,12 +1281,15 @@ TECHNICAL REQUIREMENTS:
 - Clean, modern, professional aesthetic
   `.trim();
 
-  // Collect API keys
-  const allApiKeys = [
-    process.env.API_KEY,
-    process.env.IMAGEN_API_KEY,
-    process.env.VEO_API_KEY,
-  ].filter((key, index, arr) => key && key.length > 0 && arr.indexOf(key) === index) as string[];
+  // Use ONLY the dedicated IMAGEN_API_KEY for image generation
+  const imagenApiKey = process.env.IMAGEN_API_KEY;
+  
+  if (!imagenApiKey) {
+    console.error('❌ No IMAGEN_API_KEY configured');
+    // Fall through to Pexels/placeholder fallbacks
+  }
+  
+  const allApiKeys = imagenApiKey ? [imagenApiKey] : [];
   
   // LAYER 1: Try Imagen 4 via rate-limited queue
   // This is the CRITICAL change - all Imagen requests go through the queue
