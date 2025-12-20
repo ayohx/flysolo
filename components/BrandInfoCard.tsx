@@ -38,12 +38,18 @@ const LogoImage: React.FC<LogoImageProps> = ({ src, alt, brandName, brandUrl, si
     lg: 24,
   };
 
-  // Reset state when src changes
+  // Reset state ONLY when actual src URL value changes (not on every render)
+  // Use a ref to track the previous src to avoid unnecessary resets
+  const prevSrcRef = React.useRef<string | null | undefined>(src);
   useEffect(() => {
-    setCurrentSrc(src || null);
-    setFallbackAttempted(false);
-    setIsLoading(true);
-    setShowInitials(false);
+    // Only reset if the actual URL string changed, not just the reference
+    if (prevSrcRef.current !== src) {
+      prevSrcRef.current = src;
+      setCurrentSrc(src || null);
+      setFallbackAttempted(false);
+      setIsLoading(true);
+      setShowInitials(false);
+    }
   }, [src]);
 
   // Generate a consistent color from brand name

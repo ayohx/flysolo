@@ -301,6 +301,13 @@ function App() {
     appStateRef.current = appState;
   }, [appState]);
   
+  // Ref to track current brand ID for async operations (prevents cross-brand API calls)
+  const currentBrandIdRef = React.useRef<string | null>(currentBrandId);
+  React.useEffect(() => {
+    currentBrandIdRef.current = currentBrandId;
+    console.log('📍 Active brand ID updated:', currentBrandId?.slice(0, 8) || 'none');
+  }, [currentBrandId]);
+  
   // Toast notifications
   const toast = useToast();
   
@@ -754,10 +761,23 @@ function App() {
 
   const startImageGeneration = async (postsToGen: SocialPost[], profile: BrandProfile, overrideBrandId?: string | null) => {
     const MAX_RETRIES = 2;
-    // Use override brandId if provided, otherwise fall back to state (may be stale during brand switch)
-    const activeBrandId = overrideBrandId !== undefined ? overrideBrandId : currentBrandId;
+    // Use override brandId if provided, otherwise fall back to ref (more current than state)
+    const activeBrandId = overrideBrandId !== undefined ? overrideBrandId : currentBrandIdRef.current;
+    
+    // CRITICAL: Validate brand context before starting any API calls
+    if (!activeBrandId) {
+      console.log('⚠️ No active brand ID, skipping image generation');
+      return;
+    }
     
     postsToGen.forEach(async (post) => {
+      // CRITICAL: Check if brand has changed BEFORE making API call
+      // This prevents wasted API calls when user switches brands quickly
+      if (currentBrandIdRef.current !== activeBrandId) {
+        console.log(`⛔ Brand changed (${activeBrandId?.slice(0, 8)} → ${currentBrandIdRef.current?.slice(0, 8)}), cancelling image generation for post ${post.id.slice(0, 8)}`);
+        return;
+      }
+      
       // Skip if post already has an image, is currently loading, or is marked as failed
       if (post.imageUrl || loadingImages.has(post.id)) return;
       if (post.imageSource === 'placeholder') return; // Already failed, don't retry
@@ -868,7 +888,7 @@ function App() {
   // Eager load images as user swipes - load up to 3 in parallel
   // CRITICAL: Exclude posts that have already failed (placeholder) or exceeded attempts
   useEffect(() => {
-    if (appState === AppState.SWIPING && brandProfile) {
+    if (appState === AppState.SWIPING && brandProfile && currentBrandId) {
       // Find pending images that:
       // 1. Don't have an image yet
       // 2. Aren't currently loading
@@ -888,10 +908,11 @@ function App() {
       const canLoad = Math.max(0, 3 - currentlyLoading);
       
       if (pending.length > 0 && canLoad > 0) {
-        startImageGeneration(pending.slice(0, canLoad), brandProfile);
+        // CRITICAL: Pass currentBrandId explicitly to prevent stale closure issues
+        startImageGeneration(pending.slice(0, canLoad), brandProfile, currentBrandId);
       }
     }
-  }, [generatedPosts, appState, brandProfile, loadingImages, generationAttempts]);
+  }, [generatedPosts, appState, brandProfile, loadingImages, generationAttempts, currentBrandId]);
 
   const handleLike = async (post: SocialPost) => {
     // Add to liked posts

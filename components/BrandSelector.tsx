@@ -35,12 +35,20 @@ const BrandLogo: React.FC<BrandLogoProps> = ({ src, brandName, brandColor, brand
     lg: 'text-xl',
   };
 
-  // Reset state when src or brandUrl changes
+  // Reset state ONLY when actual values change (not on every render)
+  // Use refs to track previous values and avoid unnecessary logo reloads
+  const prevSrcRef = React.useRef<string | null | undefined>(src);
+  const prevBrandUrlRef = React.useRef<string | undefined>(brandUrl);
   useEffect(() => {
-    setCurrentSrc(src || null);
-    setFallbackAttempted(false);
-    setIsLoading(true);
-    setShowInitials(false);
+    // Only reset if the actual URL strings changed, not just references
+    if (prevSrcRef.current !== src || prevBrandUrlRef.current !== brandUrl) {
+      prevSrcRef.current = src;
+      prevBrandUrlRef.current = brandUrl;
+      setCurrentSrc(src || null);
+      setFallbackAttempted(false);
+      setIsLoading(true);
+      setShowInitials(false);
+    }
   }, [src, brandUrl]);
 
   const handleError = () => {
