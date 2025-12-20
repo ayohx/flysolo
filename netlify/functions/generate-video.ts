@@ -114,22 +114,67 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       
       const location = "us-central1";
       
-      // VEO uses standard operations.get endpoint for status
-      // operationName is like "projects/xxx/locations/xxx/publishers/google/models/xxx/operations/xxx"
-      const statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
+      // VEO 2.0 uses predictLongRunning which returns an LRO (Long Running Operation)
+      // The operation name format varies - try multiple endpoint patterns
+      
+      // Pattern 1: Direct operation path (for publisher model operations)
+      let statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
+      
+      // Pattern 2: If operation name is just the operation ID, construct full path
+      if (!operationName.startsWith('projects/')) {
+        // Extract operation ID and construct proper path
+        statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/operations/${operationName}`;
+      }
       
       console.log("📡 Status endpoint:", statusEndpoint);
       
-      const statusResponse = await fetch(statusEndpoint, {
+      let statusResponse = await fetch(statusEndpoint, {
         method: "GET",  // Standard GET for operation status
         headers: {
           "Authorization": `Bearer ${accessToken}`,
         },
       });
       
+      // If first endpoint fails with 404, try alternative pattern
+      if (statusResponse.status === 404 && operationName.includes('/publishers/')) {
+        console.log("⚠️ Publisher endpoint 404, trying standard operations endpoint...");
+        
+        // Extract just the operation ID from the full path
+        const opIdMatch = operationName.match(/operations\/([^/]+)$/);
+        if (opIdMatch) {
+          const opId = opIdMatch[1];
+          const altEndpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/operations/${opId}`;
+          console.log("📡 Alternative endpoint:", altEndpoint);
+          
+          statusResponse = await fetch(altEndpoint, {
+            method: "GET",
+            headers: {
+              "Authorization": `Bearer ${accessToken}`,
+            },
+          });
+        }
+      }
+      
       if (!statusResponse.ok) {
         const errorText = await statusResponse.text();
         console.error("❌ Status check failed:", statusResponse.status, errorText);
+        
+        // For 404, provide more helpful debugging info
+        if (statusResponse.status === 404) {
+          console.error("❌ Operation not found - it may have expired or was never created");
+          console.error("   Tried endpoint:", statusEndpoint);
+          console.error("   Operation name:", operationName);
+          return {
+            statusCode: 200, // Return 200 so client knows function worked
+            headers,
+            body: JSON.stringify({
+              status: "failed",
+              done: true,
+              error: "Video operation not found. The operation may have expired (VEO operations typically last ~1 hour) or generation failed.",
+            }),
+          };
+        }
+        
         return {
           statusCode: statusResponse.status,
           headers,
