@@ -80,30 +80,70 @@ function App() {
     setIsHydrated(true);
   }, []);
   
+  // Helper to safely save to localStorage with quota handling
+  const safeLocalStorageSet = (key: string, value: string) => {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e: any) {
+      if (e.name === 'QuotaExceededError') {
+        console.warn('⚠️ LocalStorage quota exceeded, clearing old data...');
+        // Clear large data to make room
+        localStorage.removeItem(STORAGE_KEYS.GENERATED_POSTS);
+        localStorage.removeItem(STORAGE_KEYS.LIKED_POSTS);
+        // Try again with cleared storage
+        try {
+          localStorage.setItem(key, value);
+        } catch {
+          console.error('❌ LocalStorage still full after clearing');
+        }
+      } else {
+        console.error('LocalStorage error:', e);
+      }
+    }
+  };
+  
+  // Strip base64 images from posts before saving (they're too large for localStorage)
+  const stripBase64Images = (posts: SocialPost[]): SocialPost[] => {
+    return posts.map(post => ({
+      ...post,
+      // Only keep URL-based images, not base64
+      imageUrl: post.imageUrl?.startsWith('data:') ? undefined : post.imageUrl,
+    }));
+  };
+  
   // Save to localStorage when state changes
   useEffect(() => {
     if (!isHydrated) return; // Don't save during initial hydration
     if (brandProfile) {
-      localStorage.setItem(STORAGE_KEYS.BRAND_PROFILE, JSON.stringify(brandProfile));
+      // Strip large image arrays from profile before saving
+      const lightProfile = {
+        ...brandProfile,
+        imageAssets: brandProfile.imageAssets?.slice(0, 5), // Keep only first 5
+      };
+      safeLocalStorageSet(STORAGE_KEYS.BRAND_PROFILE, JSON.stringify(lightProfile));
     }
   }, [brandProfile, isHydrated]);
   
   useEffect(() => {
     if (!isHydrated) return;
     if (generatedPosts.length > 0) {
-      localStorage.setItem(STORAGE_KEYS.GENERATED_POSTS, JSON.stringify(generatedPosts));
+      // Strip base64 images and limit to 20 posts max
+      const postsToSave = stripBase64Images(generatedPosts.slice(0, 20));
+      safeLocalStorageSet(STORAGE_KEYS.GENERATED_POSTS, JSON.stringify(postsToSave));
     }
   }, [generatedPosts, isHydrated]);
   
   useEffect(() => {
     if (!isHydrated) return;
-    localStorage.setItem(STORAGE_KEYS.LIKED_POSTS, JSON.stringify(likedPosts));
+    // Strip base64 images from liked posts too
+    const likedToSave = stripBase64Images(likedPosts.slice(0, 50));
+    safeLocalStorageSet(STORAGE_KEYS.LIKED_POSTS, JSON.stringify(likedToSave));
   }, [likedPosts, isHydrated]);
   
   useEffect(() => {
     if (!isHydrated) return;
     if (appState === AppState.SWIPING || appState === AppState.DASHBOARD) {
-      localStorage.setItem(STORAGE_KEYS.APP_STATE, appState);
+      safeLocalStorageSet(STORAGE_KEYS.APP_STATE, appState);
     }
   }, [appState, isHydrated]);
   
