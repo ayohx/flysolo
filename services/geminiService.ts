@@ -1828,16 +1828,34 @@ export const generatePostVideo = async (
     console.log("📝 Text prompt:", textToVideoPrompt.substring(0, 200) + "...");
     
     // Use SDK for text-to-video
-    const response = await client.models.generateVideos({
-      model: "veo-2.0-generate-001",
-      prompt: textToVideoPrompt,
-      config: {
-        aspectRatio: "9:16",
-        numberOfVideos: 1,
-        durationSeconds: durationSeconds,
-        personGeneration: "dont_allow",
-      },
-    });
+    // Note: VEO 3 is preferred but may not be available in all regions
+    // Falls back to VEO 2 if VEO 3 fails
+    const veoModels = ["veo-3.0-generate-001", "veo-2.0-generate-001"];
+    let response: any;
+    
+    for (const veoModel of veoModels) {
+      try {
+        console.log(`🎬 Trying ${veoModel} for text-to-video...`);
+        response = await client.models.generateVideos({
+          model: veoModel,
+          prompt: textToVideoPrompt,
+          config: {
+            aspectRatio: "9:16",
+            numberOfVideos: 1,
+            durationSeconds: durationSeconds,
+            personGeneration: "dont_allow",
+          },
+        });
+        console.log(`✅ ${veoModel} accepted the request`);
+        break; // Success - exit loop
+      } catch (modelError: any) {
+        console.warn(`⚠️ ${veoModel} failed:`, modelError?.message?.substring(0, 100));
+        if (veoModel === veoModels[veoModels.length - 1]) {
+          throw modelError; // Last model failed, re-throw
+        }
+        // Continue to next model
+      }
+    }
     return response as any;
   };
 

@@ -115,51 +115,82 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       const location = "us-central1";
       
       // VEO 2.0 uses predictLongRunning which returns an LRO with UUID-style operation ID
-      // The standard operations.get API expects numeric Long IDs, not UUIDs
-      // So we need to use fetchPredictOperation on the model endpoint instead
+      // CRITICAL: Must use fetchPredictOperation endpoint, NOT standard operations API
+      // The `:wait` and direct GET endpoints don't work with VEO's UUID operation IDs
       
       // Extract model path from operation name
       // Format: projects/{project}/locations/{location}/publishers/google/models/{model}/operations/{opId}
       const modelMatch = operationName.match(/^(projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+)\/operations\/([^/]+)$/);
       
-      let statusEndpoint: string;
-      let requestBody: any = {};
-      let method = "GET";
+      let statusResponse: Response;
       
       if (modelMatch) {
-        // VEO model operation - use fetchPredictOperation
+        // VEO model operation - use fetchPredictOperation (the CORRECT approach)
         const modelPath = modelMatch[1];
         const opId = modelMatch[2];
         
-        // Use the LRO wait endpoint which works with UUID operation IDs
-        statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}:wait`;
-        method = "POST";
-        requestBody = { timeout: "1s" }; // Short timeout to just check status
+        // METHOD 1: fetchPredictOperation - specifically designed for VEO/Imagen async operations
+        const fetchOpEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${modelPath}:fetchPredictOperation`;
+        console.log("📡 VEO fetchPredictOperation endpoint:", fetchOpEndpoint);
+        console.log("   Operation ID:", opId);
         
-        console.log("📡 VEO status endpoint (LRO wait):", statusEndpoint);
+        statusResponse = await fetch(fetchOpEndpoint, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            operationName: operationName,
+          }),
+        });
+        
+        // If fetchPredictOperation fails, try direct GET on the operation
+        if (!statusResponse.ok) {
+          const errorText = await statusResponse.text();
+          console.log("⚠️ fetchPredictOperation failed:", statusResponse.status, errorText.substring(0, 200));
+          
+          // METHOD 2: Direct GET on operation (fallback)
+          console.log("⚠️ Trying direct GET on operation...");
+          const directEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
+          
+          statusResponse = await fetch(directEndpoint, {
+            method: "GET",
+            headers: {
+              "Authorization": `Bearer ${accessToken}`,
+            },
+          });
+          
+          // If direct GET also fails, try the LRO wait endpoint
+          if (!statusResponse.ok) {
+            console.log("⚠️ Direct GET failed, trying LRO wait...");
+            const waitEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}:wait`;
+            
+            statusResponse = await fetch(waitEndpoint, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ timeout: "1s" }),
+            });
+          }
+        }
       } else if (!operationName.startsWith('projects/')) {
         // Just an operation ID - construct standard path
-        statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/operations/${operationName}`;
-        console.log("📡 Standard operations endpoint:", statusEndpoint);
+        const standardEndpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/operations/${operationName}`;
+        console.log("📡 Standard operations endpoint:", standardEndpoint);
+        
+        statusResponse = await fetch(standardEndpoint, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+          },
+        });
       } else {
         // Full path but not a model operation - try direct GET
-        statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
-        console.log("📡 Direct operation endpoint:", statusEndpoint);
-      }
-      
-      let statusResponse = await fetch(statusEndpoint, {
-        method: method,
-        headers: {
-          "Authorization": `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: method === "POST" ? JSON.stringify(requestBody) : undefined,
-      });
-      
-      // If LRO wait fails, try direct GET on the operation
-      if (!statusResponse.ok && method === "POST") {
-        console.log("⚠️ LRO wait failed, trying direct GET...");
         const directEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
+        console.log("📡 Direct operation endpoint:", directEndpoint);
         
         statusResponse = await fetch(directEndpoint, {
           method: "GET",
@@ -285,10 +316,14 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     const durationSeconds = duration === "5s" ? 5 : 8;
     
     // Vertex AI endpoint for VEO
-    // Using veo-2.0-generate-001 for image-to-video stability
+    // CRITICAL: VEO 3 supports image-to-video, VEO 2 does NOT!
+    // - veo-3.0-generate-001: Supports image-to-video + text-to-video (preferred)
+    // - veo-2.0-generate-001: Text-to-video ONLY (legacy fallback)
     const location = "us-central1";
-    const model = "veo-2.0-generate-001";
+    const model = imageBase64 ? "veo-3.0-generate-001" : "veo-2.0-generate-001";
     const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predictLongRunning`;
+    
+    console.log(`🎬 Using model: ${model} (${imageBase64 ? 'IMAGE-TO-VIDEO' : 'TEXT-TO-VIDEO'})`);
 
     let requestBody: any;
     
