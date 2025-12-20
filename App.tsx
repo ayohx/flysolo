@@ -54,6 +54,9 @@ function App() {
   // Error handling state
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   
+  // State to track if we need to generate content after loading
+  const [needsContentGeneration, setNeedsContentGeneration] = useState(false);
+  
   // Restore state from Supabase on mount (localStorage only for lightweight data)
   useEffect(() => {
     const initializeApp = async () => {
@@ -75,27 +78,19 @@ function App() {
             setCurrentBrandId(savedBrandId);
             setLikedPosts(workspace.savedPosts);
             
-            // Generate fresh content for this session (not from storage)
-            // This will be triggered when we enter SWIPING state
+            // Set state and flag that we need content generation
             if (savedState === AppState.SWIPING || savedState === AppState.DASHBOARD) {
               setAppState(savedState as AppState);
-              
-              // Auto-generate content if we're in swiping mode but have no posts
-              if (savedState === AppState.SWIPING) {
-                console.log('🎨 Generating fresh content for session...');
-                const posts = await generateContentIdeas(workspace.brand.profile_json, 10);
-                setGeneratedPosts(posts);
-                startImageGeneration(posts.slice(0, 10), workspace.brand.profile_json, savedBrandId);
-              }
             } else {
               setAppState(AppState.SWIPING);
-              const posts = await generateContentIdeas(workspace.brand.profile_json, 10);
-              setGeneratedPosts(posts);
-              startImageGeneration(posts.slice(0, 10), workspace.brand.profile_json, savedBrandId);
             }
+            
+            // Flag to trigger content generation in separate effect
+            setNeedsContentGeneration(true);
           } else {
             // Brand not found in Supabase, check if we have brands at all
             const brands = await listBrands();
+            setAllBrands(brands);
             if (brands.length > 0) {
               setAppState(AppState.BRAND_SELECTOR);
             } else {
@@ -106,6 +101,7 @@ function App() {
           console.error('Failed to load from Supabase:', e);
           // Fallback to brand selector
           const brands = await listBrands();
+          setAllBrands(brands);
           if (brands.length > 0) {
             setAppState(AppState.BRAND_SELECTOR);
           }
@@ -696,6 +692,26 @@ function App() {
       });
     });
   };
+
+  // Generate fresh content when brand is loaded from Supabase (triggered by needsContentGeneration flag)
+  useEffect(() => {
+    const generateFreshContent = async () => {
+      if (needsContentGeneration && brandProfile && currentBrandId && generatedPosts.length === 0) {
+        console.log('🎨 Generating fresh content for session...');
+        setNeedsContentGeneration(false); // Clear flag to prevent re-running
+        
+        try {
+          const posts = await generateContentIdeas(brandProfile, 10);
+          setGeneratedPosts(posts);
+          startImageGeneration(posts.slice(0, 10), brandProfile, currentBrandId);
+        } catch (e) {
+          console.error('Failed to generate content:', e);
+        }
+      }
+    };
+    
+    generateFreshContent();
+  }, [needsContentGeneration, brandProfile, currentBrandId, generatedPosts.length]);
 
   // Eager load images as user swipes - load up to 3 in parallel
   useEffect(() => {
