@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Building2, Plus, RefreshCw, RotateCcw, Trash2, Loader2, 
-  Calendar, ImageIcon, Clock, ChevronRight, Sparkles, AlertCircle, CheckCircle2
+  Calendar, ImageIcon, Clock, ChevronRight, Sparkles, AlertCircle, CheckCircle2,
+  Archive, ArchiveRestore, FolderArchive
 } from 'lucide-react';
-import { StoredBrand, listBrands, getBrandPostCount, deleteBrand } from '../services/supabaseService';
+import { StoredBrand, listBrands, getBrandPostCount, deleteBrand, archiveBrand, restoreBrand } from '../services/supabaseService';
 import { getGoogleFavicon, getBrandInitials, extractDomain } from '../services/logoService';
 import { PendingAnalysis, AppNotification } from '../types';
 
@@ -125,10 +126,13 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
   onPendingAnalysisClick,
 }) => {
   const [brands, setBrands] = useState<StoredBrand[]>([]);
+  const [archivedBrands, setArchivedBrands] = useState<StoredBrand[]>([]);
   const [loading, setLoading] = useState(true);
   const [postCounts, setPostCounts] = useState<Record<string, number>>({});
   const [refreshingBrand, setRefreshingBrand] = useState<string | null>(null);
   const [deletingBrand, setDeletingBrand] = useState<string | null>(null);
+  const [archivingBrand, setArchivingBrand] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   // Helper to normalise URLs for matching
   const normaliseUrl = (url: string): string => {
@@ -171,13 +175,21 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
 
   const loadBrands = async () => {
     setLoading(true);
-    const allBrands = await listBrands();
-    setBrands(allBrands);
     
-    // Fetch post counts for each brand
+    // Load active and archived brands in parallel
+    const [activeBrands, archived] = await Promise.all([
+      listBrands('active'),
+      listBrands('archived'),
+    ]);
+    
+    setBrands(activeBrands);
+    setArchivedBrands(archived);
+    
+    // Fetch post counts for all brands
+    const allBrandsList = [...activeBrands, ...archived];
     const counts: Record<string, number> = {};
     await Promise.all(
-      allBrands.map(async (brand) => {
+      allBrandsList.map(async (brand) => {
         counts[brand.id] = await getBrandPostCount(brand.id);
       })
     );
@@ -185,14 +197,46 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
     setLoading(false);
   };
 
+  const handleArchive = async (brandId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Archive this brand? You can restore it later from the Archived tab.')) return;
+    
+    setArchivingBrand(brandId);
+    const success = await archiveBrand(brandId);
+    if (success) {
+      const brand = brands.find(b => b.id === brandId);
+      if (brand) {
+        setBrands(prev => prev.filter(b => b.id !== brandId));
+        setArchivedBrands(prev => [{ ...brand, status: 'archived' }, ...prev]);
+      }
+    }
+    setArchivingBrand(null);
+  };
+
+  const handleRestore = async (brandId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    setArchivingBrand(brandId);
+    const success = await restoreBrand(brandId);
+    if (success) {
+      const brand = archivedBrands.find(b => b.id === brandId);
+      if (brand) {
+        setArchivedBrands(prev => prev.filter(b => b.id !== brandId));
+        setBrands(prev => [{ ...brand, status: 'active' }, ...prev]);
+      }
+    }
+    setArchivingBrand(null);
+  };
+
   const handleDelete = async (brandId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Delete this brand and all its saved posts?')) return;
+    if (!confirm('⚠️ PERMANENTLY DELETE this brand and all its saved posts? This cannot be undone!')) return;
     
     setDeletingBrand(brandId);
     const success = await deleteBrand(brandId);
     if (success) {
       setBrands(prev => prev.filter(b => b.id !== brandId));
+      setArchivedBrands(prev => prev.filter(b => b.id !== brandId));
     }
     setDeletingBrand(null);
   };
@@ -243,7 +287,7 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
   return (
     <div className="min-h-screen bg-gray-950 p-6 md:p-10">
       {/* Header */}
-      <div className="max-w-6xl mx-auto mb-10">
+      <div className="max-w-6xl mx-auto mb-6">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
@@ -259,13 +303,51 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
             <span className="hidden sm:inline">New Brand</span>
           </button>
         </div>
-        <p className="text-gray-500">Select a brand to continue or start fresh</p>
+        <p className="text-gray-500 mb-4">Select a brand to continue or start fresh</p>
+        
+        {/* Tabs: Active / Archived */}
+        {(brands.length > 0 || archivedBrands.length > 0) && (
+          <div className="flex items-center gap-2 border-b border-gray-800 pb-0">
+            <button
+              onClick={() => setShowArchived(false)}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-[2px] ${
+                !showArchived 
+                  ? 'text-white border-indigo-500' 
+                  : 'text-gray-500 border-transparent hover:text-gray-300'
+              }`}
+            >
+              <Building2 size={16} />
+              Active Brands
+              {brands.length > 0 && (
+                <span className="bg-gray-800 text-gray-400 text-xs px-1.5 py-0.5 rounded-full">
+                  {brands.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setShowArchived(true)}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-[2px] ${
+                showArchived 
+                  ? 'text-white border-amber-500' 
+                  : 'text-gray-500 border-transparent hover:text-gray-300'
+              }`}
+            >
+              <FolderArchive size={16} />
+              Archived
+              {archivedBrands.length > 0 && (
+                <span className="bg-gray-800 text-gray-400 text-xs px-1.5 py-0.5 rounded-full">
+                  {archivedBrands.length}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Brand Grid */}
-      <div className="max-w-6xl mx-auto">
-        {brands.length === 0 ? (
-          // Empty state
+      <div className="max-w-6xl mx-auto pt-6">
+        {/* Empty State - No Active Brands */}
+        {!showArchived && brands.length === 0 && archivedBrands.length === 0 ? (
           <div className="text-center py-20">
             <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center mx-auto mb-6">
               <Building2 className="w-10 h-10 text-gray-600" />
@@ -282,6 +364,90 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
               Analyze Your First Brand
             </button>
           </div>
+        ) : showArchived ? (
+          // Archived Brands View
+          archivedBrands.length === 0 ? (
+            <div className="text-center py-20">
+              <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center mx-auto mb-6">
+                <FolderArchive className="w-10 h-10 text-gray-600" />
+              </div>
+              <h2 className="text-xl font-semibold text-white mb-2">No archived brands</h2>
+              <p className="text-gray-500 max-w-md mx-auto">
+                Archived brands will appear here. You can archive brands you're not currently using.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {archivedBrands.map((brand) => (
+                <div
+                  key={brand.id}
+                  className="group relative bg-gray-900/60 border border-gray-800 rounded-2xl p-5 transition-all duration-200"
+                >
+                  {/* Archived indicator bar */}
+                  <div className="absolute top-0 left-0 right-0 h-1.5 rounded-t-2xl bg-amber-600/50" />
+
+                  {/* Brand Header */}
+                  <div className="flex items-start gap-4 mb-4">
+                    <BrandLogo 
+                      src={brand.logo_url}
+                      brandName={brand.name}
+                      brandColor={getBrandColor(brand)}
+                      brandUrl={brand.url}
+                      size="md"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-lg font-semibold text-gray-400 truncate">
+                        {brand.name}
+                      </h3>
+                      <p className="text-sm text-gray-600 truncate">{brand.industry}</p>
+                    </div>
+                  </div>
+
+                  {/* Stats */}
+                  <div className="flex items-center gap-4 text-sm text-gray-500 mb-4">
+                    <div className="flex items-center gap-1.5">
+                      <ImageIcon size={14} />
+                      <span>{postCounts[brand.id] || 0} posts</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Clock size={14} />
+                      <span>{formatDate(brand.updated_at)}</span>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 pt-3 border-t border-gray-800">
+                    <button
+                      onClick={(e) => handleRestore(brand.id, e)}
+                      disabled={archivingBrand === brand.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg transition-colors disabled:opacity-50"
+                      title="Restore brand"
+                    >
+                      {archivingBrand === brand.id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <ArchiveRestore size={14} />
+                      )}
+                      <span>Restore</span>
+                    </button>
+                    <button
+                      onClick={(e) => handleDelete(brand.id, e)}
+                      disabled={deletingBrand === brand.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors ml-auto disabled:opacity-50"
+                      title="Permanently delete"
+                    >
+                      {deletingBrand === brand.id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={14} />
+                      )}
+                      <span>Delete</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {/* Pending Analysis Cards (for brands being analyzed that aren't saved yet) */}
@@ -497,18 +663,32 @@ const BrandSelector: React.FC<BrandSelectorProps> = ({
                     <RotateCcw size={14} />
                     <span>Re-analyze</span>
                   </button>
-                  <button
-                    onClick={(e) => handleDelete(brand.id, e)}
-                    disabled={deletingBrand === brand.id}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors ml-auto disabled:opacity-50"
-                    title="Delete brand"
-                  >
-                    {deletingBrand === brand.id ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Trash2 size={14} />
-                    )}
-                  </button>
+                  <div className="flex items-center gap-1 ml-auto">
+                    <button
+                      onClick={(e) => handleArchive(brand.id, e)}
+                      disabled={archivingBrand === brand.id}
+                      className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-gray-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors disabled:opacity-50"
+                      title="Archive brand"
+                    >
+                      {archivingBrand === brand.id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Archive size={14} />
+                      )}
+                    </button>
+                    <button
+                      onClick={(e) => handleDelete(brand.id, e)}
+                      disabled={deletingBrand === brand.id}
+                      className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                      title="Permanently delete brand"
+                    >
+                      {deletingBrand === brand.id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={14} />
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             );

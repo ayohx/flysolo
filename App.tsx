@@ -10,9 +10,9 @@ import BrandSelector from './components/BrandSelector';
 import NotificationBell from './components/NotificationBell';
 import NotificationToast from './components/NotificationToast';
 import { ToastContainer, useToast } from './components/Toast';
-import { analyzeBrand, generateContentIdeas, generatePostImage, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand } from './services/geminiService';
+import { analyzeBrand, generateContentIdeas, generatePostImage, generatePostImageWithSource, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand } from './services/geminiService';
 import { saveBrand, saveBrandAssets, getBrandByUrl, findRelevantAsset, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Home, ArrowLeft } from 'lucide-react';
 
 // LocalStorage keys
 const STORAGE_KEYS = {
@@ -272,8 +272,8 @@ function App() {
         setGeneratedPosts(pending.posts);
         setLikedPosts([]);
         
-        // Start image generation
-        startImageGeneration(pending.posts.slice(0, 5), pending.profile);
+        // Start image generation for first 10 posts
+        startImageGeneration(pending.posts.slice(0, 10), pending.profile);
         
         // Save to Supabase
         const fullUrl = notification.brandUrl.startsWith('http') 
@@ -483,8 +483,8 @@ function App() {
       }).catch(err => console.warn('Supabase save failed (non-critical):', err));
 
       // 5. Start Image Generation in Background for the first few posts
-      // Generate images for first 5 posts immediately to ensure smooth experience
-      startImageGeneration(posts.slice(0, 5), profile);
+      // Generate images for first 10 posts initially
+      startImageGeneration(posts.slice(0, 10), profile);
 
       // Clear current analysis URL
       setCurrentAnalysisUrl(null);
@@ -522,7 +522,7 @@ function App() {
   };
 
   const startImageGeneration = async (postsToGen: SocialPost[], profile: BrandProfile, overrideBrandId?: string | null) => {
-    const MAX_RETRIES = 3;
+    const MAX_RETRIES = 2;
     // Use override brandId if provided, otherwise fall back to state (may be stale during brand switch)
     const activeBrandId = overrideBrandId !== undefined ? overrideBrandId : currentBrandId;
     
@@ -531,7 +531,8 @@ function App() {
 
       setLoadingImages(prev => new Set(prev).add(post.id));
       
-      let b64Image: string | undefined;
+      let imageUrl: string | undefined;
+      let imageSource: 'imagen3' | 'gemini' | 'pexels' | 'placeholder' | 'unknown' = 'unknown';
       let retries = 0;
       
       // PRIORITY 1: Check Supabase for real product images
@@ -543,25 +544,41 @@ function App() {
           
           if (realAsset && realAsset.url) {
             console.log(`🎯 Using REAL product image for post ${post.id}:`, realAsset.label);
-            b64Image = realAsset.url;
+            imageUrl = realAsset.url;
+            imageSource = 'imagen3'; // Treat real assets as AI-quality
           }
         } catch (e) {
           console.warn('Asset lookup failed, falling back to AI:', e);
         }
       }
       
-      // PRIORITY 2: Generate with AI if no real image found
-      if (!b64Image) {
-        while (!b64Image && retries < MAX_RETRIES) {
+      // PRIORITY 2: Generate with AI (with source tracking)
+      if (!imageUrl) {
+        while (!imageUrl && retries < MAX_RETRIES) {
           try {
-            b64Image = await generatePostImage(post.visualPrompt, profile);
+            // Use the enhanced function that tracks source
+            const result = await generatePostImageWithSource(post.visualPrompt, profile);
             
-            // Validate image URL is not empty/undefined
-            if (!b64Image || b64Image === 'undefined') {
-              b64Image = undefined;
+            if (result.imageUrl && result.imageUrl !== 'undefined') {
+              imageUrl = result.imageUrl;
+              // Map the source type
+              if (result.source === 'imagen3') imageSource = 'imagen3';
+              else if (result.source === 'gemini-flash') imageSource = 'gemini';
+              else if (result.source === 'pexels') imageSource = 'pexels';
+              else if (result.source === 'placeholder') imageSource = 'placeholder';
+              
+              console.log(`✅ Image for post ${post.id}: source=${imageSource}`);
+              
+              // Warn if we're using fallbacks
+              if (imageSource === 'pexels') {
+                console.warn(`⚠️ Post ${post.id} using STOCK photo (AI generation failed)`);
+              } else if (imageSource === 'placeholder') {
+                console.warn(`⚠️ Post ${post.id} using PLACEHOLDER (all generation failed)`);
+              }
+            } else {
               retries++;
               console.log(`Image generation attempt ${retries} failed for post ${post.id}, retrying...`);
-              await new Promise(r => setTimeout(r, 1000 * retries)); // Backoff delay
+              await new Promise(r => setTimeout(r, 1000 * retries));
             }
           } catch (error) {
             console.error(`Image generation error for post ${post.id}:`, error);
@@ -571,20 +588,21 @@ function App() {
         }
       }
       
-      // PRIORITY 3: Fallback to branded placeholder if all else fails
-      if (!b64Image) {
-        // Use branded placeholder from geminiService (will use brand colors)
-        console.log(`Using branded placeholder for post ${post.id}`);
-        b64Image = await generatePostImage(post.visualPrompt, profile);
+      // PRIORITY 3: Final fallback if all retries exhausted
+      if (!imageUrl) {
+        console.log(`Using branded placeholder for post ${post.id} after all retries`);
+        imageUrl = await generatePostImage(post.visualPrompt, profile);
+        imageSource = 'placeholder';
       }
       
+      // Update posts with both URL and source tracking
       setGeneratedPosts(current => 
-        current.map(p => p.id === post.id ? { ...p, imageUrl: b64Image } : p)
+        current.map(p => p.id === post.id ? { ...p, imageUrl, imageSource } : p)
       );
       
       // Also update liked posts if it exists there
       setLikedPosts(current =>
-        current.map(p => p.id === post.id && !p.imageUrl ? { ...p, imageUrl: b64Image } : p)
+        current.map(p => p.id === post.id && !p.imageUrl ? { ...p, imageUrl, imageSource } : p)
       );
       
       setLoadingImages(prev => {
@@ -623,12 +641,12 @@ function App() {
     if (isGeneratingMore || !brandProfile) return;
     setIsGeneratingMore(true);
     
-    // Generate next batch
-    const newPosts = await generateContentIdeas(brandProfile, 10);
+    // Generate next batch of 5 posts (cost efficient)
+    const newPosts = await generateContentIdeas(brandProfile, 5);
     setGeneratedPosts(prev => [...prev, ...newPosts]);
     
-    // Start generating images for the first 2 new ones immediately
-    startImageGeneration(newPosts.slice(0, 2), brandProfile);
+    // Start generating images for all 5 new ones
+    startImageGeneration(newPosts.slice(0, 5), brandProfile);
     
     setIsGeneratingMore(false);
   };
@@ -745,8 +763,18 @@ function App() {
     // The prompt should describe HOW to animate, not WHAT is in the image
     const motionPrompt = instruction || "Subtle cinematic motion with gentle camera movement";
     
+    // Critical: Log the exact image being animated so we can verify
+    console.log("🎬 Animating image:", {
+      hasImage: !!editingPost.imageUrl,
+      imageType: editingPost.imageUrl?.startsWith('data:') ? 'base64' : 
+                 editingPost.imageUrl?.startsWith('http') ? 'URL' : 'unknown',
+      imagePreview: editingPost.imageUrl?.substring(0, 80) + '...',
+      motionPrompt,
+    });
+    
     try {
-      // Pass the source image for image-to-video mode (animates the actual image)
+      // Pass the source image for image-to-video mode (animates the EXACT image on the card)
+      // This ensures the video animation matches what the user sees
       const result = await generatePostVideo(motionPrompt, brandProfile, '5s', editingPost.imageUrl);
       
       if (result.status === 'success' && result.videoUrl) {
@@ -867,8 +895,8 @@ function App() {
     generateContentIdeas(workspace.brand.profile_json, 10)
       .then(freshPosts => {
         setGeneratedPosts(freshPosts);
-        // Start image generation with explicit brand ID to avoid stale state
-        startImageGeneration(freshPosts.slice(0, 5), workspace.brand.profile_json, brand.id);
+        // Start image generation for first 10 posts
+        startImageGeneration(freshPosts.slice(0, 10), workspace.brand.profile_json, brand.id);
         setIsGeneratingMore(false);
       })
       .catch(err => {
@@ -1023,7 +1051,14 @@ function App() {
         </>
       );
     case AppState.ONBOARDING:
-      return <Onboarding onStart={handleStartAnalysis} errorMessage={analysisError} />;
+      return (
+        <Onboarding 
+          onStart={handleStartAnalysis} 
+          errorMessage={analysisError} 
+          onBackToBrands={handleBackToBrands}
+          hasExistingBrands={allBrands.length > 0}
+        />
+      );
     case AppState.ANALYZING:
       return (
         <AnalysisLoader 
@@ -1034,6 +1069,19 @@ function App() {
     case AppState.SWIPING:
       return (
         <div className="h-screen w-full bg-gray-950 flex items-center justify-center p-4 relative">
+            {/* Top Left: Home Button */}
+            <div className="absolute top-4 left-4 z-20">
+              <button
+                onClick={handleBackToBrands}
+                className="flex items-center gap-2 px-3 py-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-xl transition-colors"
+                title="Back to all brands"
+              >
+                <Home size={18} />
+                <span className="hidden sm:inline text-sm font-medium">All Brands</span>
+              </button>
+            </div>
+            
+            {/* Top Right: Notifications & Skip */}
             <div className="absolute top-4 right-4 z-20 flex items-center gap-3">
                  <NotificationBell
                     notifications={notifications}
@@ -1132,6 +1180,7 @@ function App() {
             onBack={() => setAppState(AppState.SWIPING)}
             onSelectPost={handleEditOpen}
             onReschedulePost={handleReschedulePost}
+            onBackToBrands={handleBackToBrands}
           />
           {/* Global Notification Bell */}
           <div className="fixed top-4 right-4 z-50">
@@ -1170,6 +1219,8 @@ function App() {
                 profile={brandProfile} 
                 onUpdatePost={handleUpdatePost} 
                 onEditPost={handleEditOpen}
+                onBackToBrands={handleBackToBrands}
+                onBackToSwiping={() => setAppState(AppState.SWIPING)}
             />
             {/* Global Notification Bell */}
             <div className="fixed top-4 right-4 z-50">

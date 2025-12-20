@@ -16,6 +16,11 @@ export interface BrandProfile {
   assets?: string[]; // List of detected product/brand image URLs
 }
 
+/**
+ * Image source tracking - tells users where the image came from
+ */
+export type ImageSource = 'imagen3' | 'gemini' | 'pexels' | 'placeholder' | 'unknown';
+
 export interface SocialPost {
   id: string;
   platform: 'Instagram' | 'LinkedIn' | 'Twitter/X' | 'TikTok';
@@ -23,6 +28,7 @@ export interface SocialPost {
   hashtags: string[];
   visualPrompt: string;
   imageUrl?: string; // Base64 or URL
+  imageSource?: ImageSource; // Tracks where the image came from
   status: 'pending' | 'generating_image' | 'ready' | 'liked' | 'discarded';
   scheduledDate?: string; // ISO String
   // Video fields for animated content

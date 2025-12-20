@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SocialPost, BrandProfile } from '../types';
-import { Download, Copy, Calendar, LayoutGrid, Sparkles, Loader2, Clock } from 'lucide-react';
+import { Download, Copy, Calendar, LayoutGrid, Sparkles, Loader2, Clock, Home, ArrowLeft } from 'lucide-react';
 import CalendarView from './CalendarView';
 import { autoSchedulePosts } from '../services/geminiService';
 import Editor from './Editor';
@@ -10,9 +10,11 @@ interface DashboardProps {
   profile: BrandProfile;
   onUpdatePost: (post: SocialPost) => void;
   onEditPost: (post: SocialPost) => void;
+  onBackToBrands?: () => void;
+  onBackToSwiping?: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ posts, profile, onUpdatePost, onEditPost }) => {
+const Dashboard: React.FC<DashboardProps> = ({ posts, profile, onUpdatePost, onEditPost, onBackToBrands, onBackToSwiping }) => {
   const [view, setView] = useState<'grid' | 'calendar'>('grid');
   const [isScheduling, setIsScheduling] = useState(false);
   const [selectedPost, setSelectedPost] = useState<SocialPost | null>(null);
@@ -40,6 +42,28 @@ const Dashboard: React.FC<DashboardProps> = ({ posts, profile, onUpdatePost, onE
     <div className="min-h-screen bg-gray-950 p-6 md:p-12">
       <header className="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
+          {/* Navigation buttons */}
+          <div className="flex items-center gap-2 mb-3">
+            {onBackToBrands && (
+              <button
+                onClick={onBackToBrands}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors text-sm"
+                title="Back to all brands"
+              >
+                <Home size={16} />
+                <span>All Brands</span>
+              </button>
+            )}
+            {onBackToSwiping && (
+              <button
+                onClick={onBackToSwiping}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors text-sm"
+              >
+                <ArrowLeft size={16} />
+                <span>Create More</span>
+              </button>
+            )}
+          </div>
           <h1 className="text-3xl font-bold text-white mb-2">Campaign Manager</h1>
           <p className="text-gray-400">
             Managing content for <span className="text-indigo-400 font-semibold">{profile.name}</span>

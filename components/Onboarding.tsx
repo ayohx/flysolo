@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { ArrowRight, Globe, Sparkles, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowRight, Globe, Sparkles, AlertCircle, Loader2, ArrowLeft, Home } from 'lucide-react';
 import { validateUrlAccessibility } from '../services/geminiService';
 
 interface OnboardingProps {
   onStart: (url: string) => void;
   errorMessage?: string | null;
+  onBackToBrands?: () => void;
+  hasExistingBrands?: boolean;
 }
 
-const Onboarding: React.FC<OnboardingProps> = ({ onStart, errorMessage: externalError }) => {
+const Onboarding: React.FC<OnboardingProps> = ({ onStart, errorMessage: externalError, onBackToBrands, hasExistingBrands }) => {
   const [url, setUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -74,6 +76,19 @@ const Onboarding: React.FC<OnboardingProps> = ({ onStart, errorMessage: external
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden bg-gradient-to-br from-black via-gray-900 to-indigo-950">
+      {/* Back to Brands Button */}
+      {onBackToBrands && hasExistingBrands && (
+        <div className="absolute top-4 left-4 z-20">
+          <button
+            onClick={onBackToBrands}
+            className="flex items-center gap-2 px-4 py-2 text-gray-400 hover:text-white bg-gray-800/50 hover:bg-gray-800 rounded-xl transition-colors"
+          >
+            <ArrowLeft size={18} />
+            <span className="text-sm font-medium">Back to Brands</span>
+          </button>
+        </div>
+      )}
+      
       {/* Background decoration */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 opacity-20 pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-600 rounded-full blur-[100px] animate-pulse"></div>

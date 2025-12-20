@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { SocialPost, BrandProfile } from '../types';
-import { X, Check, Edit2, RefreshCw, PlusCircle, Layers, ImageIcon, Menu, ChevronLeft, Film, Play, Loader2, Calendar } from 'lucide-react';
+import { SocialPost, BrandProfile, ImageSource } from '../types';
+import { X, Check, Edit2, RefreshCw, PlusCircle, Layers, ImageIcon, Menu, ChevronLeft, Film, Play, Loader2, Calendar, Sparkles, Image, AlertTriangle } from 'lucide-react';
 import BrandInfoCard from './BrandInfoCard';
 import LikedAssetsPanel from './LikedAssetsPanel';
 import { StoredBrand } from '../services/supabaseService';
@@ -75,11 +75,11 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
     setPrevRemaining(remainingPosts);
   }, [remainingPosts]);
 
-  // Infinite Scroll Trigger - IMPROVED with eager loading
+  // Infinite Scroll Trigger - Optimised for cost efficiency
+  // Only trigger when down to 5 cards to save API credits
   useEffect(() => {
-    // Trigger earlier (at 10 cards) to prevent blank screen when swiping fast
-    if (remainingPosts <= 10 && !isGeneratingMore && remainingPosts > 0) {
-      console.log("🔄 Low on cards, fetching more... (remaining:", remainingPosts, ")");
+    if (remainingPosts <= 5 && !isGeneratingMore && remainingPosts > 0) {
+      console.log("🔄 Low on cards (5 left), fetching more... (remaining:", remainingPosts, ")");
       onFetchMore();
     }
   }, [remainingPosts, isGeneratingMore, onFetchMore]);
@@ -319,6 +319,9 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
             </div>
           </div>
         )}
+        
+        {/* Image Source Badge - shows if AI generated, stock, or placeholder */}
+        {post.imageUrl && renderImageSourceBadge(post.imageSource)}
       </div>
       <div className="h-2/5 p-6 flex flex-col justify-between bg-gray-900/95 backdrop-blur-sm">
         <div>
@@ -353,6 +356,57 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
   };
 
   const swipeIndicator = getSwipeIndicator();
+  
+  // Helper to render image source badge
+  const renderImageSourceBadge = (source: ImageSource | undefined) => {
+    if (!source || source === 'unknown') return null;
+    
+    const badges: Record<ImageSource, { label: string; color: string; icon: React.ReactNode; tooltip: string }> = {
+      'imagen3': { 
+        label: 'AI Generated', 
+        color: 'bg-emerald-500/90', 
+        icon: <Sparkles size={10} />,
+        tooltip: 'Created with Imagen 3 AI'
+      },
+      'gemini': { 
+        label: 'AI Generated', 
+        color: 'bg-blue-500/90', 
+        icon: <Sparkles size={10} />,
+        tooltip: 'Created with Gemini AI'
+      },
+      'pexels': { 
+        label: 'Stock Photo', 
+        color: 'bg-amber-500/90', 
+        icon: <Image size={10} />,
+        tooltip: 'From Pexels stock library'
+      },
+      'placeholder': { 
+        label: 'Placeholder', 
+        color: 'bg-red-500/90', 
+        icon: <AlertTriangle size={10} />,
+        tooltip: 'AI generation failed - temporary placeholder'
+      },
+      'unknown': { 
+        label: '', 
+        color: '', 
+        icon: null,
+        tooltip: ''
+      },
+    };
+    
+    const badge = badges[source];
+    if (!badge.label) return null;
+    
+    return (
+      <div 
+        className={`absolute bottom-4 left-4 ${badge.color} backdrop-blur-md text-white text-[10px] px-2 py-1 rounded-full flex items-center gap-1 font-medium shadow-lg`}
+        title={badge.tooltip}
+      >
+        {badge.icon}
+        <span>{badge.label}</span>
+      </div>
+    );
+  };
 
   return (
     <div className="h-full w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-4 lg:gap-8 p-4 relative">

@@ -708,78 +708,79 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
   }
 
   const prompt = `
-    You are a specialized Social Media Manager for ${safeProfile.name}.
+    You are an ELITE Social Media Creative Director at a top marketing agency, working for ${safeProfile.name}.
+    Your designs rival Canva Pro templates - polished, scroll-stopping, and conversion-focused.
     
-    BRAND CONTEXT:
+    BRAND DNA:
     - Industry: ${safeProfile.industry}
-    - What we sell (Summary): ${safeProfile.products}
+    - Products: ${safeProfile.products}
     - Specific Offerings: ${offeringsList}
-    - Tone: ${safeProfile.vibe}
+    - Brand Voice: ${safeProfile.vibe}
     - Strategy: ${safeProfile.strategy}
-    - Brand Essence: ${safeProfile.essence}
+    - Essence: ${safeProfile.essence}
     
     ${specificInstruction}
 
-    Task: Create ${count} distinct, high-quality social media posts.
+    YOUR MISSION: Create ${count} PREMIUM social media posts that look like they cost £500 each.
     
-    CRITICAL INSTRUCTION - PRODUCT-SPECIFIC CONTENT:
-    Each post MUST focus on ONE specific offering from the list: ${offeringsList}
-    DO NOT be generic. Use the exact product/service name.
+    PRODUCT FOCUS (CRITICAL):
+    Each post MUST spotlight ONE specific offering: ${offeringsList}
+    NO generic content. Use EXACT product/service names.
     
-    PLATFORM RULES (STRICTLY FOLLOW):
-    1. **LinkedIn**: Content MUST be long-form (100-200 words). Professional tone. Focus on industry insights.
-    2. **Instagram/TikTok**: Content MUST be visual-first. Short, punchy captions (under 30 words).
-    3. **Twitter/X**: Short, provocative, or news-centric.
+    CAPTION FORMATTING (CANVA-STYLE):
+    - Use line breaks for readability
+    - Start with a HOOK (question, bold statement, or emoji)
+    - Include a clear CTA (call-to-action)
+    - British English spelling
     
-    VISUAL PROMPT RULES (ABSOLUTELY CRITICAL - THIS CONTROLS IMAGE QUALITY):
-    The 'visualPrompt' field determines what image gets generated. It MUST be extremely specific.
+    PLATFORM MASTERY:
+    1. **LinkedIn**: Professional storytelling (100-200 words). Value-first. End with engagement question.
+    2. **Instagram**: Punchy, visual-first (under 40 words). Use 1-2 emojis strategically. Hook in first line.
+    3. **TikTok**: Trend-aware, casual, engaging. Use current lingo. Under 30 words.
+    4. **Twitter/X**: Sharp, provocative. Drive clicks. Under 20 words.
     
-    MANDATORY 6-STEP STRUCTURE for visualPrompt (ALL REQUIRED):
+    VISUAL PROMPT RULES (THIS CREATES THE CANVA-QUALITY IMAGE):
+    The 'visualPrompt' creates the AI-generated marketing visual. Make it STUNNING.
     
-    1. COMPOSITION TYPE: Start with exact framing
-       Examples: "Close-up product shot", "Wide angle scene", "Overhead flat lay", "Dynamic action shot"
+    THINK LIKE A CANVA PRO DESIGNER - 6-STEP STRUCTURE:
     
-    2. SPECIFIC SUBJECT: Name the EXACT product/service from offerings
-       ❌ BAD: "athletic shoes"
-       ✅ GOOD: "Nike Air Max 90 sneakers" or "Jordan 1 High basketball shoes"
-       - For ${safeProfile.name}: Use exact product names like ${exampleOfferingsText}.
+    1. LAYOUT TYPE (pick one):
+       - "Elegant flat lay arrangement" (product + props)
+       - "Hero product shot with gradient background"
+       - "Lifestyle mockup scene"
+       - "Bold geometric composition"
+       - "Minimalist centered product"
     
-    3. VISUAL ELEMENTS: Match brand style
-       - Explicitly incorporate: ${safeProfile.visualStyle}
-       - Example: "minimalist studio setup" or "urban street photography style"
+    2. THE STAR: Name the EXACT product/service
+       ❌ WRONG: "athletic shoes"
+       ✅ RIGHT: "${exampleOfferingsText}"
     
-    4. BRAND COLORS: Mention these EXACT colors in the scene composition
+    3. DESIGN ELEMENTS (Canva-style):
+       - Geometric shapes, abstract elements, or props
+       - Clean negative space
+       - ${safeProfile.visualStyle}
+    
+    4. BRAND COLOUR PALETTE (use these EXACTLY):
        - Primary: ${safeProfile.colors[0]}
        - Secondary: ${safeProfile.colors[1]}
-       - Accent: ${safeProfile.colors[2] || safeProfile.colors[0]}
-       - Example: "against a ${safeProfile.colors[0]} gradient background with ${safeProfile.colors[1]} accent lighting"
+       - Accent: ${safeProfile.colors[2] || '#ffffff'}
+       Format: "Background in ${safeProfile.colors[0]}, accents in ${safeProfile.colors[1]}"
     
-    5. LIGHTING & MOOD: Be specific
-       Examples: "soft golden hour lighting", "dramatic studio lighting", "bright daylight", "moody low-key lighting"
+    5. LIGHTING & ATMOSPHERE:
+       - "Soft studio lighting with subtle shadows"
+       - "Bright, airy, clean white light"
+       - "Dramatic contrast with deep shadows"
+       - "Warm golden hour glow"
     
-    6. STYLE KEYWORDS: End with photography style
-       Examples: "professional ${safeProfile.industry} product photography", "high-end social media marketing imagery", "lifestyle brand photography"
+    6. QUALITY KEYWORDS (always include):
+       "Ultra-high quality, 8K resolution, professional marketing photography, social media optimised, no text, no logos, no watermarks"
     
-    FULL EXAMPLE of EXCELLENT visualPrompt for Nike:
-    "Close-up product shot of Nike Air Max 270 sneakers in black and white colorway, positioned on a ${safeProfile.colors[0]} geometric platform with ${safeProfile.colors[1]} accent lighting behind. Minimalist studio composition with dramatic shadows. Professional athletic footwear product photography with high-end social media marketing quality."
+    CANVA-QUALITY EXAMPLE:
+    "Elegant flat lay of ${exampleOfferingsText} on ${safeProfile.colors[0]} textured background. Geometric ${safeProfile.colors[1]} accent shapes frame the composition. Soft diffused studio lighting creates clean shadows. Minimalist styling with strategic negative space. Ultra-high quality professional marketing photography, 8K, no text or logos."
     
-    EXAMPLES of BAD visualPrompts (NEVER DO THIS):
-    ❌ "A nice image of our product" - TOO VAGUE
-    ❌ "Shoes in a desert" - WRONG CONTEXT
-    ❌ "Athletic scene" - NOT SPECIFIC ENOUGH
-    ❌ "A beautiful composition" - NO PRODUCT MENTIONED
-    
-    LENGTH REQUIREMENT: Each visualPrompt must be 40-60 words with ALL 6 steps.
-    
-    VERIFICATION CHECKLIST (AI must check before returning):
-    □ Does visualPrompt mention a specific product name from offerings?
-    □ Does it include composition type?
-    □ Does it mention exact brand colors?
-    □ Does it specify lighting/mood?
-    □ Does it match the brand's visual style?
-    □ Is it 40-60 words long?
+    LENGTH: 50-70 words. Dense with visual instructions.
 
-    Return a JSON array of posts. Every visualPrompt must pass the checklist above.
+    Return a JSON array of ${count} posts. Each must have stunning visualPrompt.
   `;
 
   try {
@@ -820,48 +821,257 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
 };
 
 /**
+ * Image source tracking for user feedback
+ */
+export type ImageSource = 'imagen3' | 'gemini-flash' | 'pexels' | 'placeholder';
+
+/**
+ * Result from image generation with source tracking
+ */
+export interface ImageGenerationResult {
+  imageUrl?: string;
+  source: ImageSource;
+  error?: string;
+}
+
+/**
+ * Diagnostic logging for Imagen failures
+ */
+const diagnoseImagenFailure = (context: {
+  model: string;
+  apiKeyPrefix: string;
+  error: any;
+  attemptNumber: number;
+}) => {
+  const errorDetails = {
+    model: context.model,
+    apiKeyPrefix: context.apiKeyPrefix,
+    attemptNumber: context.attemptNumber,
+    errorCode: context.error?.code || 'UNKNOWN',
+    errorMessage: context.error?.message || String(context.error),
+    errorStatus: context.error?.status || 'N/A',
+    errorDetails: context.error?.details || null,
+    timestamp: new Date().toISOString(),
+  };
+  
+  console.error('🔴 IMAGEN DIAGNOSTIC:', JSON.stringify(errorDetails, null, 2));
+  
+  // Specific guidance based on error type
+  if (context.error?.message?.includes('API key')) {
+    console.error('💡 FIX: Check that VITE_IMAGEN_API_KEY is set correctly in Netlify');
+  } else if (context.error?.message?.includes('not found') || context.error?.message?.includes('404')) {
+    console.error('💡 FIX: Imagen 3 model may not be enabled. Enable it in Google Cloud Console');
+  } else if (context.error?.message?.includes('quota') || context.error?.message?.includes('rate')) {
+    console.error('💡 FIX: API quota exceeded. Wait or increase quota in Google Cloud Console');
+  } else if (context.error?.message?.includes('permission') || context.error?.message?.includes('403')) {
+    console.error('💡 FIX: API key lacks permission for Imagen. Enable Imagen API in Cloud Console');
+  }
+  
+  return errorDetails;
+};
+
+/**
+ * Generate image using Gemini Flash with native image generation
+ * Tries multiple Gemini image models in order of preference
+ */
+const generateImageWithGemini = async (
+  prompt: string,
+  aspectRatio: string = "1:1"
+): Promise<string | undefined> => {
+  // Gemini models with image generation capability (in order of preference)
+  const geminiImageModels = [
+    "gemini-2.5-flash-image",         // Native image generation
+    "gemini-2.5-flash-image-preview", // Preview version
+    "gemini-2.0-flash-exp",           // Experimental
+  ];
+  
+  for (const model of geminiImageModels) {
+    console.log(`🎨 Attempting ${model} image generation...`);
+    
+    try {
+      const response = await getTextClient().models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          responseMimeType: "text/plain",
+        },
+      });
+      
+      // Check if response contains image data
+      const text = response.text;
+      if (text && text.includes('data:image')) {
+        console.log(`✅ ${model} returned image data`);
+        return text.trim();
+      }
+      
+      // Try to extract base64 image from response parts
+      const parts = (response as any).candidates?.[0]?.content?.parts;
+      if (parts) {
+        for (const part of parts) {
+          if (part.inlineData?.mimeType?.startsWith('image/')) {
+            console.log(`✅ ${model} returned inline image`);
+            return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+          }
+        }
+      }
+      
+      console.warn(`⚠️ ${model} did not return image data`);
+    } catch (error: any) {
+      console.warn(`⚠️ ${model} failed:`, error?.message || error);
+      continue;
+    }
+  }
+  
+  return undefined;
+};
+
+/**
+ * Direct REST API call to Imagen 4 (bypasses SDK issues)
+ * Sometimes more reliable than using the SDK
+ */
+const generateImageWithRestApi = async (
+  prompt: string,
+  apiKey: string,
+  aspectRatio: string = "1:1"
+): Promise<string | undefined> => {
+  // Try Imagen 4 models in order of preference
+  const modelsToTry = [
+    "imagen-4.0-generate-001",
+    "imagen-4.0-fast-generate-001",
+  ];
+  
+  for (const model of modelsToTry) {
+    const result = await tryImagenRestApi(prompt, apiKey, model, aspectRatio);
+    if (result) return result;
+  }
+  
+  return undefined;
+};
+
+/**
+ * Helper: Try a specific Imagen model via REST API
+ */
+const tryImagenRestApi = async (
+  prompt: string,
+  apiKey: string,
+  model: string,
+  aspectRatio: string = "1:1"
+): Promise<string | undefined> => {
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateImage?key=${apiKey}`;
+  
+  console.log('🌐 Attempting Imagen 3 via direct REST API...');
+  
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: { text: prompt },
+        numberOfImages: 1,
+        aspectRatio: aspectRatio === "9:16" ? "9:16" : aspectRatio === "16:9" ? "16:9" : "1:1",
+        safetyFilterLevel: "BLOCK_ONLY_HIGH",
+        personGeneration: "allow_adult",
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Imagen REST API error:', response.status, errorText);
+      
+      // Parse error for more specific guidance
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.error?.message) {
+          console.error('   📋 Error message:', errorJson.error.message);
+          if (errorJson.error.message.includes('not found')) {
+            console.error('   💡 FIX: Enable Imagen API in Google Cloud Console');
+          } else if (errorJson.error.message.includes('permission')) {
+            console.error('   💡 FIX: API key lacks Imagen permissions');
+          }
+        }
+      } catch {}
+      
+      return undefined;
+    }
+    
+    const result = await response.json();
+    
+    // Extract image from response
+    const imageData = result.generatedImages?.[0]?.image?.imageBytes ||
+                      result.images?.[0]?.bytesBase64Encoded;
+    
+    if (imageData) {
+      console.log('✅ Imagen REST API returned image!');
+      return `data:image/png;base64,${imageData}`;
+    }
+    
+    console.warn('⚠️ Imagen REST API response had no image data:', JSON.stringify(result).substring(0, 200));
+    return undefined;
+  } catch (error: any) {
+    console.error('❌ Imagen REST API failed:', error?.message || error);
+    return undefined;
+  }
+};
+
+/**
  * Generates an image for a specific post using Imagen 3 model.
  * 
- * MULTI-KEY FALLBACK CHAIN:
- * 1. Try Imagen 3 with API_KEY
- * 2. Try Imagen 3 with IMAGEN_API_KEY
- * 3. Try Imagen 3 with VEO_API_KEY
- * 4. Try Imagen 3 with VEO_API_KEY_2
- * 5. Fallback to Pexels stock images
- * 6. Ultimate fallback: branded placeholder
+ * ENHANCED MULTI-LAYER FALLBACK CHAIN:
+ * 1. Try Imagen 3 with all available API keys (highest quality)
+ * 2. Try Gemini 2.0 Flash image generation (reliable)
+ * 3. Fallback to Pexels stock images (with brand context)
+ * 4. Ultimate fallback: branded placeholder (never fails)
  * 
  * CRITICAL: This uses ENHANCED prompt engineering to ensure brand DNA is respected.
+ * Now with FULL DIAGNOSTIC LOGGING to identify why Imagen might fail.
  */
-export const generatePostImage = async (visualPrompt: string, profile: BrandProfile, aspectRatio: string = "1:1"): Promise<string | undefined> => {
+export const generatePostImage = async (
+  visualPrompt: string, 
+  profile: BrandProfile, 
+  aspectRatio: string = "1:1"
+): Promise<string | undefined> => {
   const safeProfile = normaliseBrandProfile(profile);
 
-  // ENHANCED prompt engineering - forces brand consistency
+  // ENHANCED prompt engineering for Imagen 3
+  // Best practices: Be specific, visual, and action-oriented
+  // Imagen 3 responds best to descriptive scene-setting prompts
+  
+  const primaryColor = safeProfile.colors[0] || '#1a1a2e';
+  const secondaryColor = safeProfile.colors[1] || '#4a4a8a';
+  const accentColor = safeProfile.colors[2] || '#7c3aed';
+  
+  // Build a highly visual, specific prompt optimised for Imagen 3
   const finalPrompt = `
-    Create a professional social media marketing image for ${safeProfile.name}.
-    
-    BRAND DNA (MUST FOLLOW EXACTLY):
-    - Industry: ${safeProfile.industry}
-    - Visual Style: ${safeProfile.visualStyle}
-    - Exact Brand Colors: ${safeProfile.colors.slice(0, 3).join(', ')} (use these prominently)
-    - Brand Vibe: ${safeProfile.vibe}
-    - Brand Essence: ${safeProfile.essence || safeProfile.name}
-    
-    COMPOSITION & CONTENT:
-    ${visualPrompt}
-    
-    CREATIVE DIRECTION:
-    - Use the exact brand colors as primary palette
-    - Match the ${safeProfile.visualStyle} aesthetic precisely
-    - Professional ${safeProfile.industry} photography style
-    - Modern, high-end social media marketing quality
-    - Engaging composition that stops scrolling
-    
-    TECHNICAL REQUIREMENTS:
-    - No text, no logos, no watermarks
-    - Sharp focus, professional lighting
-    - Social media optimized (high engagement potential)
-    - Photorealistic quality
-  `;
+Professional marketing photograph for ${safeProfile.name} (${safeProfile.industry}).
+
+SCENE DESCRIPTION:
+${visualPrompt}
+
+VISUAL STYLE:
+${safeProfile.visualStyle}. Professional ${safeProfile.industry} marketing aesthetic.
+
+COLOUR PALETTE (CRITICAL):
+Primary: ${primaryColor} (dominant colour in scene)
+Secondary: ${secondaryColor} (supporting accents)
+Accent: ${accentColor} (highlights and details)
+Use these exact brand colours prominently in the composition.
+
+PHOTOGRAPHY STYLE:
+- High-end commercial product photography
+- Studio quality lighting with soft shadows
+- Sharp focus, shallow depth of field where appropriate
+- Composition suitable for Instagram/social media
+
+TECHNICAL REQUIREMENTS:
+- NO text, NO logos, NO watermarks, NO writing
+- NO people, NO faces, NO hands (product-focused only)
+- Photorealistic, 8K quality
+- Clean, modern, professional aesthetic
+- High contrast, vibrant colours
+- Suitable for social media marketing
+  `.trim();
+  
+  console.log('📝 Final Imagen prompt (first 300 chars):', finalPrompt.substring(0, 300) + '...');
 
   // Collect ALL available API keys (using existing env vars)
   // Remove duplicates and empty values
@@ -876,22 +1086,37 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
     return key && key.length > 0 && arr.indexOf(key) === index;
   }) as string[];
 
-  console.log(`🖼️ Attempting image generation with ${uniqueApiKeys.length} API keys...`);
+  // Log API key availability for debugging
+  console.log('🔑 API Key Status:', {
+    hasApiKey: !!process.env.API_KEY,
+    hasImagenKey: !!process.env.IMAGEN_API_KEY,
+    hasVeoKey: !!process.env.VEO_API_KEY,
+    hasVeoKey2: !!process.env.VEO_API_KEY_2,
+    uniqueKeyCount: uniqueApiKeys.length,
+  });
+  
+  console.log(`🖼️ Attempting Imagen 3 image generation with ${uniqueApiKeys.length} API keys...`);
 
-  // Imagen model candidates to try with each key
+  // Imagen model candidates to try with each key (ordered by preference)
+  // Updated: Imagen 4.0 is now the latest, Imagen 3.0 has been deprecated
   const modelCandidates = [
-    "imagen-3.0-generate-001",
-    "imagen-3.0-fast-generate-001",
-    "imagen-2.0-generate-001",
+    "imagen-4.0-generate-001",       // Imagen 4 (highest quality, current)
+    "imagen-4.0-fast-generate-001",  // Imagen 4 Fast (faster, good quality)
+    "imagen-4.0-ultra-generate-001", // Imagen 4 Ultra (highest quality)
+    "imagen-3.0-generate-001",       // Imagen 3 (legacy fallback)
   ];
 
   let lastError: any = null;
   let attemptCount = 0;
+  const diagnosticErrors: any[] = [];
 
-  // Try each API key
+  // ==========================================
+  // LAYER 1: Try Imagen 3 with all API keys
+  // ==========================================
   for (let keyIndex = 0; keyIndex < uniqueApiKeys.length; keyIndex++) {
     const apiKey = uniqueApiKeys[keyIndex];
-    console.log(`🔑 Trying API key ${keyIndex + 1}/${uniqueApiKeys.length}...`);
+    const apiKeyPrefix = apiKey.substring(0, 10) + '...';
+    console.log(`🔑 Trying API key ${keyIndex + 1}/${uniqueApiKeys.length} (${apiKeyPrefix})`);
     
     try {
       const client = new GoogleGenAI({ apiKey });
@@ -899,6 +1124,8 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
       // Try each model with this API key
       for (const model of modelCandidates) {
         attemptCount++;
+        console.log(`   📸 Attempt ${attemptCount}: ${model}`);
+        
         try {
           const response = await client.models.generateImages({
             model,
@@ -912,27 +1139,94 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
           if (response.generatedImages && response.generatedImages.length > 0) {
             const imageData = response.generatedImages[0].image?.imageBytes;
             if (imageData) {
-              console.log(`✅ Image generated successfully with key ${keyIndex + 1}, model: ${model}`);
+              console.log(`✅ IMAGEN 3 SUCCESS with key ${keyIndex + 1}, model: ${model}`);
+              console.log('   🎨 Image Source: IMAGEN 3 AI-GENERATED');
               return `data:image/png;base64,${imageData}`;
             }
           }
 
-          console.warn(`⚠️ Key ${keyIndex + 1}, model ${model}: No images returned`);
+          console.warn(`   ⚠️ ${model}: API returned but no images in response`);
+          diagnosticErrors.push({
+            model,
+            apiKeyPrefix,
+            error: 'Empty response - no images returned',
+            attemptNumber: attemptCount,
+          });
         } catch (err: any) {
           lastError = err;
-          console.warn(`⚠️ Key ${keyIndex + 1}, model ${model} failed:`, err?.message || err);
+          // Detailed diagnostic logging
+          const diagnostic = diagnoseImagenFailure({
+            model,
+            apiKeyPrefix,
+            error: err,
+            attemptNumber: attemptCount,
+          });
+          diagnosticErrors.push(diagnostic);
           continue;
         }
       }
     } catch (err: any) {
       lastError = err;
-      console.warn(`⚠️ API key ${keyIndex + 1} initialization failed:`, err?.message || err);
+      console.error(`❌ API key ${keyIndex + 1} client initialization failed:`, err?.message || err);
       continue;
     }
   }
+  
+  // Log summary of all Imagen failures
+  console.error('📊 IMAGEN SDK FAILURE SUMMARY:', {
+    totalAttempts: attemptCount,
+    uniqueKeysTriedCount: uniqueApiKeys.length,
+    lastErrorMessage: lastError?.message || 'Unknown',
+    diagnosticCount: diagnosticErrors.length,
+  });
+  
+  // ==========================================
+  // LAYER 1.5: Try Imagen via direct REST API (bypasses SDK issues)
+  // ==========================================
+  console.log('🔄 Trying Imagen 3 via direct REST API (SDK may have issues)...');
+  
+  for (const apiKey of uniqueApiKeys) {
+    const restImage = await generateImageWithRestApi(finalPrompt, apiKey, aspectRatio);
+    if (restImage) {
+      console.log('✅ IMAGEN 3 REST API SUCCESS');
+      console.log('   🎨 Image Source: IMAGEN 3 AI-GENERATED (via REST)');
+      return restImage;
+    }
+  }
+  
+  console.log('❌ Imagen REST API also failed for all keys');
 
-  // All Imagen keys failed - try Pexels
-  console.log(`🔄 All ${attemptCount} Imagen attempts failed, trying Pexels...`);
+  // ==========================================
+  // LAYER 2: Try Gemini 2.0 Flash (experimental)
+  // ==========================================
+  console.log(`🔄 All ${attemptCount} Imagen attempts failed. Trying Gemini 2.0 Flash...`);
+  
+  // Build a simpler prompt for Gemini (it's more flexible)
+  const geminiImagePrompt = `
+    Generate a professional marketing image for ${safeProfile.name}.
+    
+    Visual description: ${visualPrompt}
+    
+    Brand colours: ${safeProfile.colors.slice(0, 3).join(', ')}
+    Style: ${safeProfile.visualStyle}
+    
+    Requirements:
+    - High-quality, professional marketing imagery
+    - No text, no logos, no watermarks
+    - Social media optimised
+  `;
+  
+  const geminiImage = await generateImageWithGemini(geminiImagePrompt, aspectRatio);
+  if (geminiImage) {
+    console.log('✅ GEMINI 2.0 FLASH SUCCESS');
+    console.log('   🎨 Image Source: GEMINI AI-GENERATED');
+    return geminiImage;
+  }
+  
+  // ==========================================
+  // LAYER 3: Pexels Stock Photos (with brand context)
+  // ==========================================
+  console.log(`🔄 Gemini fallback failed. Trying Pexels stock images...`);
   
   if (isPexelsConfigured()) {
     try {
@@ -941,18 +1235,126 @@ export const generatePostImage = async (visualPrompt: string, profile: BrandProf
       
       if (pexelsImage) {
         console.log(`✅ Pexels image found as fallback`);
+        console.log('   📷 Image Source: PEXELS STOCK PHOTO (AI generation failed)');
+        console.warn('   ⚠️ This is a stock photo, NOT an AI-generated image!');
         return pexelsImage;
       }
     } catch (pexelsError) {
       console.warn('⚠️ Pexels fallback failed:', pexelsError);
     }
   } else {
-    console.log('⚠️ Pexels not configured, skipping fallback');
+    console.log('⚠️ Pexels not configured (VITE_PEXELS_API_KEY missing)');
   }
 
-  // Ultimate fallback - branded placeholder
+  // ==========================================
+  // LAYER 4: Branded Placeholder (never fails)
+  // ==========================================
   console.log('🎨 Using branded placeholder as final fallback');
+  console.warn('   ⚠️ This is a PLACEHOLDER, not real content!');
+  console.warn('   💡 To fix: Configure Imagen 3 API in Google Cloud Console');
+  console.warn('   💡 Ensure VITE_GEMINI_API_KEY has access to Imagen API');
+  
   return getBrandedPlaceholderImage(safeProfile, visualPrompt);
+};
+
+/**
+ * Enhanced image generation with source tracking
+ * Returns both the image URL and where it came from
+ */
+export const generatePostImageWithSource = async (
+  visualPrompt: string, 
+  profile: BrandProfile, 
+  aspectRatio: string = "1:1"
+): Promise<ImageGenerationResult> => {
+  const safeProfile = normaliseBrandProfile(profile);
+  
+  const primaryColor = safeProfile.colors[0] || '#1a1a2e';
+  const secondaryColor = safeProfile.colors[1] || '#4a4a8a';
+  const accentColor = safeProfile.colors[2] || '#7c3aed';
+  
+  const finalPrompt = `
+Professional marketing photograph for ${safeProfile.name} (${safeProfile.industry}).
+
+SCENE DESCRIPTION:
+${visualPrompt}
+
+VISUAL STYLE:
+${safeProfile.visualStyle}. Professional ${safeProfile.industry} marketing aesthetic.
+
+COLOUR PALETTE (CRITICAL):
+Primary: ${primaryColor} (dominant colour in scene)
+Secondary: ${secondaryColor} (supporting accents)
+Accent: ${accentColor} (highlights and details)
+
+PHOTOGRAPHY STYLE:
+- High-end commercial product photography
+- Studio quality lighting with soft shadows
+- Sharp focus, composition suitable for Instagram/social media
+
+TECHNICAL REQUIREMENTS:
+- NO text, NO logos, NO watermarks
+- Photorealistic, high quality
+- Clean, modern, professional aesthetic
+  `.trim();
+
+  // Collect API keys
+  const allApiKeys = [
+    process.env.API_KEY,
+    process.env.IMAGEN_API_KEY,
+    process.env.VEO_API_KEY,
+  ].filter((key, index, arr) => key && key.length > 0 && arr.indexOf(key) === index) as string[];
+  
+  // LAYER 1: Try Imagen 4 SDK (latest models)
+  const imagenModels = ["imagen-4.0-generate-001", "imagen-4.0-fast-generate-001"];
+  
+  for (const apiKey of allApiKeys) {
+    for (const model of imagenModels) {
+      try {
+        const client = new GoogleGenAI({ apiKey });
+        const response = await client.models.generateImages({
+          model,
+          prompt: finalPrompt,
+          config: { numberOfImages: 1, aspectRatio: aspectRatio === "9:16" ? "9:16" : "1:1" },
+        });
+        
+        const imageData = response.generatedImages?.[0]?.image?.imageBytes;
+        if (imageData) {
+          console.log(`✅ Imagen 4 SUCCESS with model: ${model}`);
+          return { imageUrl: `data:image/png;base64,${imageData}`, source: 'imagen3' };
+        }
+      } catch {}
+    }
+  }
+  
+  // LAYER 2: Try Imagen REST API
+  for (const apiKey of allApiKeys) {
+    const restImage = await generateImageWithRestApi(finalPrompt, apiKey, aspectRatio);
+    if (restImage) {
+      return { imageUrl: restImage, source: 'imagen3' };
+    }
+  }
+  
+  // LAYER 3: Try Gemini
+  const geminiImage = await generateImageWithGemini(finalPrompt, aspectRatio);
+  if (geminiImage) {
+    return { imageUrl: geminiImage, source: 'gemini-flash' };
+  }
+  
+  // LAYER 4: Pexels
+  if (isPexelsConfigured()) {
+    const pexelsOrientation = aspectRatio === "9:16" ? 'portrait' : 'square';
+    const pexelsImage = await searchPexelsImage(safeProfile, visualPrompt, pexelsOrientation);
+    if (pexelsImage) {
+      return { imageUrl: pexelsImage, source: 'pexels' };
+    }
+  }
+  
+  // LAYER 5: Placeholder
+  return { 
+    imageUrl: getBrandedPlaceholderImage(safeProfile, visualPrompt), 
+    source: 'placeholder',
+    error: 'All AI image generation methods failed. Using branded placeholder.',
+  };
 };
 
 /**
@@ -1391,44 +1793,51 @@ export const generatePostVideo = async (
   };
 
   // Helper function to attempt video generation with a specific client
+  // Supports both IMAGE-TO-VIDEO (animate exact source image) and TEXT-TO-VIDEO
   const tryGenerateVideo = async (clientGetter: () => GoogleGenAI, useImageToVideo: boolean = true) => {
     const client = clientGetter();
-    const apiKey = process.env.VEO_API_KEY || process.env.API_KEY;
+    const veoApiKey = process.env.VEO_API_KEY || process.env.API_KEY;
     
     // If we have a source image AND image-to-video is enabled, use IMAGE-TO-VIDEO mode
-    // Handle both data:image URLs and regular URLs
+    // This animates the EXACT image the user sees on the card
     let imageBase64: string | undefined;
     let mimeType: string = 'image/png';
     
     if (useImageToVideo && sourceImage) {
+      console.log("🖼️ Source image provided for animation:", sourceImage.substring(0, 50) + "...");
+      
       if (sourceImage.startsWith('data:image/')) {
-        // Already base64
+        // Already base64 - extract the data
         const matches = sourceImage.match(/^data:(image\/\w+);base64,(.+)$/);
         if (matches) {
           mimeType = matches[1];
           imageBase64 = matches[2];
-          console.log(`📷 Using base64 image: ${mimeType}, ${Math.round(imageBase64.length / 1024)}KB`);
+          console.log(`📷 Extracted base64 image: ${mimeType}, ${Math.round(imageBase64.length / 1024)}KB`);
         }
       } else if (sourceImage.startsWith('http')) {
         // URL - convert to base64
+        console.log("🔄 Converting URL to base64 for image-to-video...");
         const converted = await urlToBase64(sourceImage);
         if (converted) {
           imageBase64 = converted.base64;
           mimeType = converted.mimeType;
+          console.log(`📷 Converted URL to base64: ${mimeType}, ${Math.round(imageBase64.length / 1024)}KB`);
         }
       }
     }
     
+    // VEO 2.0 is more reliable for image-to-video than VEO 3.0
+    // VEO 2.0: 5-10 seconds, VEO 3.0: 4-8 seconds
+    const durationSeconds = duration === "5s" ? 5 : 8;
+    
     if (useImageToVideo && imageBase64) {
-      console.log("🎬 IMAGE-TO-VIDEO mode - animating source image...");
+      console.log("🎬 IMAGE-TO-VIDEO mode - animating the EXACT source image...");
       console.log("📝 Motion prompt:", imageToVideoPrompt);
+      console.log(`📏 Duration: ${durationSeconds}s`);
       
-      // Use REST API directly for image-to-video (SDK doesn't support it!)
-      // Google AI Studio REST endpoint for VEO image-to-video
-      const veoApiKey = process.env.VEO_API_KEY || process.env.API_KEY;
-      const veoEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:generateVideo?key=${veoApiKey}`;
-      
-      const requestBody = {
+      // Try multiple API formats for image-to-video
+      // Format 1: VEO 2.0 with instances/parameters (Vertex AI style)
+      const format1RequestBody = {
         instances: [{
           prompt: imageToVideoPrompt,
           image: {
@@ -1439,59 +1848,102 @@ export const generatePostVideo = async (
         parameters: {
           aspectRatio: "9:16",
           sampleCount: 1,
-          durationSeconds: duration === "5s" ? 5 : 10,
+          durationSeconds: durationSeconds,
           personGeneration: "dont_allow",
         },
       };
       
-      console.log("📤 Attempting image-to-video via REST API...");
+      console.log("📤 Attempting VEO 2.0 image-to-video (format 1)...");
       
       try {
-        const response = await fetch(veoEndpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-        });
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:generateVideo?key=${veoApiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(format1RequestBody),
+          }
+        );
         
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.warn("⚠️ REST API image-to-video failed:", response.status, errorText);
-          throw new Error(`REST API failed: ${response.status}`);
+        if (response.ok) {
+          const result = await response.json();
+          console.log("✅ Image-to-video (format 1) accepted:", result.name || "success");
+          return result;
         }
         
-        const result = await response.json();
-        console.log("✅ Image-to-video request accepted via REST API:", result);
-        return result;
-      } catch (restError: any) {
-        console.warn("⚠️ REST API image-to-video failed, falling back to text-to-video...", restError.message);
-        
-        // Fall back to SDK text-to-video with safe motion prompt
-        console.log("🔄 Using text-to-video fallback with safe motion prompt...");
-    const response = await client.models.generateVideos({
-      model: "veo-2.0-generate-001",
-          prompt: imageToVideoPrompt,
-      config: {
+        const errorText = await response.text();
+        console.warn("⚠️ Format 1 failed:", response.status, errorText.substring(0, 200));
+      } catch (err: any) {
+        console.warn("⚠️ Format 1 error:", err.message);
+      }
+      
+      // Format 2: VEO 3.0 with contents/generationConfig (Gemini style)
+      console.log("📤 Attempting VEO 3.0 image-to-video (format 2)...");
+      const format2RequestBody = {
+        contents: [{
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: imageBase64,
+              },
+            },
+            {
+              text: imageToVideoPrompt,
+            },
+          ],
+        }],
+        generationConfig: {
+          responseModalities: ["VIDEO"],
+          videoConfig: {
             aspectRatio: "9:16",
-        numberOfVideos: 1,
-        durationSeconds: duration === "5s" ? 5 : 10,
+            numberOfVideos: 1,
+            durationSeconds: durationSeconds,
             personGeneration: "dont_allow",
           },
-        });
-        return response as any;
+        },
+      };
+      
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:generateContent?key=${veoApiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(format2RequestBody),
+          }
+        );
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log("✅ Image-to-video (format 2) accepted:", result.name || "success");
+          return result;
+        }
+        
+        const errorText = await response.text();
+        console.warn("⚠️ Format 2 failed:", response.status, errorText.substring(0, 200));
+      } catch (err: any) {
+        console.warn("⚠️ Format 2 error:", err.message);
       }
+      
+      // If both image-to-video formats fail, fall back to text-to-video
+      console.warn("⚠️ All image-to-video formats failed - falling back to text-to-video...");
+      console.warn("💡 Note: The generated video may not match the exact source image.");
     }
     
-    // TEXT-TO-VIDEO mode (no source image, or image-to-video disabled)
-    console.log("📝 TEXT-TO-VIDEO mode (no source image)...");
+    // TEXT-TO-VIDEO mode (no source image, or image-to-video failed)
+    console.log("📝 TEXT-TO-VIDEO mode...");
     console.log("📝 Text prompt:", textToVideoPrompt.substring(0, 200) + "...");
     
+    // Use SDK for text-to-video (more reliable)
     const response = await client.models.generateVideos({
-      model: "veo-2.0-generate-001",
+      model: "veo-2.0-generate-001", // VEO 2.0 for stability
       prompt: textToVideoPrompt,
       config: {
         aspectRatio: "9:16",
         numberOfVideos: 1,
-        durationSeconds: duration === "5s" ? 5 : 10,
+        durationSeconds: durationSeconds,
         personGeneration: "dont_allow",
       },
     });

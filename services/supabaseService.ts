@@ -47,6 +47,8 @@ export const isSupabaseConfigured = async (): Promise<boolean> => {
 // BRAND OPERATIONS
 // ============================================================================
 
+export type BrandStatus = 'active' | 'archived' | 'deleted';
+
 export interface StoredBrand {
   id: string;
   url: string;
@@ -54,6 +56,7 @@ export interface StoredBrand {
   industry: string;
   profile_json: BrandProfile;
   logo_url?: string;
+  status: BrandStatus;
   created_at: string;
   updated_at: string;
 }
@@ -128,26 +131,92 @@ export const getBrandByUrl = async (url: string): Promise<StoredBrand | null> =>
 };
 
 /**
- * List all saved brands
+ * List all saved brands (optionally filtered by status)
+ * By default, only returns active brands. Pass 'all' to include archived.
  */
-export const listBrands = async (): Promise<StoredBrand[]> => {
+export const listBrands = async (filter: 'active' | 'archived' | 'all' = 'active'): Promise<StoredBrand[]> => {
   const client = getSupabase();
   
   try {
-    const { data, error } = await client
+    let query = client
       .from('brands')
       .select('*')
       .order('updated_at', { ascending: false });
+    
+    // Filter by status (handle legacy brands without status field)
+    if (filter === 'active') {
+      // Include brands with 'active' status OR null/undefined status (legacy)
+      query = query.or('status.eq.active,status.is.null');
+    } else if (filter === 'archived') {
+      query = query.eq('status', 'archived');
+    }
+    // 'all' = no filter
+    
+    const { data, error } = await query;
     
     if (error) {
       console.error('Failed to list brands:', error);
       return [];
     }
     
-    return data as StoredBrand[];
+    // Normalize legacy brands (set default status)
+    return (data || []).map(brand => ({
+      ...brand,
+      status: brand.status || 'active',
+    })) as StoredBrand[];
   } catch (e) {
     console.error('Brand list error:', e);
     return [];
+  }
+};
+
+/**
+ * Archive a brand (soft delete - can be restored)
+ */
+export const archiveBrand = async (brandId: string): Promise<boolean> => {
+  const client = getSupabase();
+  
+  try {
+    const { error } = await client
+      .from('brands')
+      .update({ status: 'archived', updated_at: new Date().toISOString() })
+      .eq('id', brandId);
+    
+    if (error) {
+      console.error('Failed to archive brand:', error);
+      return false;
+    }
+    
+    console.log('📦 Brand archived:', brandId);
+    return true;
+  } catch (e) {
+    console.error('Brand archive error:', e);
+    return false;
+  }
+};
+
+/**
+ * Restore an archived brand
+ */
+export const restoreBrand = async (brandId: string): Promise<boolean> => {
+  const client = getSupabase();
+  
+  try {
+    const { error } = await client
+      .from('brands')
+      .update({ status: 'active', updated_at: new Date().toISOString() })
+      .eq('id', brandId);
+    
+    if (error) {
+      console.error('Failed to restore brand:', error);
+      return false;
+    }
+    
+    console.log('✅ Brand restored:', brandId);
+    return true;
+  } catch (e) {
+    console.error('Brand restore error:', e);
+    return false;
   }
 };
 

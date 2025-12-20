@@ -1,6 +1,6 @@
 import React from 'react';
 import { SocialPost, BrandProfile } from '../types';
-import { ArrowLeft, Layers, Calendar as CalendarIcon } from 'lucide-react';
+import { ArrowLeft, Layers, Calendar as CalendarIcon, Home } from 'lucide-react';
 import CalendarView from './CalendarView';
 
 interface CalendarPageProps {
@@ -9,6 +9,7 @@ interface CalendarPageProps {
   onBack: () => void;
   onSelectPost: (post: SocialPost) => void;
   onReschedulePost?: (postId: string, newDate: string) => void;
+  onBackToBrands?: () => void;
 }
 
 const CalendarPage: React.FC<CalendarPageProps> = ({ 
@@ -16,7 +17,8 @@ const CalendarPage: React.FC<CalendarPageProps> = ({
   profile, 
   onBack, 
   onSelectPost,
-  onReschedulePost
+  onReschedulePost,
+  onBackToBrands,
 }) => {
   // Only show posts with scheduled dates
   const scheduledPosts = posts.filter(p => p.scheduledDate);
@@ -26,15 +28,26 @@ const CalendarPage: React.FC<CalendarPageProps> = ({
       {/* Header - Always Visible */}
       <header className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur-xl border-b border-gray-800 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          {/* Back Button */}
-          <button
-            onClick={onBack}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-colors font-medium"
-          >
-            <ArrowLeft size={18} />
-            <span className="hidden sm:inline">Back to Assets</span>
-            <Layers size={16} className="sm:hidden" />
-          </button>
+          {/* Navigation Buttons */}
+          <div className="flex items-center gap-2">
+            {onBackToBrands && (
+              <button
+                onClick={onBackToBrands}
+                className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-xl transition-colors"
+                title="Back to all brands"
+              >
+                <Home size={16} />
+              </button>
+            )}
+            <button
+              onClick={onBack}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-colors font-medium"
+            >
+              <ArrowLeft size={18} />
+              <span className="hidden sm:inline">Back to Assets</span>
+              <Layers size={16} className="sm:hidden" />
+            </button>
+          </div>
 
           {/* Title */}
           <div className="flex items-center gap-3">
