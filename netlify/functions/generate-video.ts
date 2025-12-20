@@ -315,15 +315,25 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     // Duration in seconds (VEO supports 5-8 seconds)
     const durationSeconds = duration === "5s" ? 5 : 8;
     
-    // Vertex AI endpoint for VEO
-    // CRITICAL: VEO 3 supports image-to-video, VEO 2 does NOT!
-    // - veo-3.0-generate-001: Supports image-to-video + text-to-video (preferred)
-    // - veo-2.0-generate-001: Text-to-video ONLY (legacy fallback)
     const location = "us-central1";
-    const model = imageBase64 ? "veo-3.0-generate-001" : "veo-2.0-generate-001";
-    const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predictLongRunning`;
     
-    console.log(`🎬 Using model: ${model} (${imageBase64 ? 'IMAGE-TO-VIDEO' : 'TEXT-TO-VIDEO'})`);
+    // VEO MODEL SELECTION WITH FALLBACK
+    // VEO 3 models that support image-to-video (try in order)
+    // VEO 2 only supports text-to-video
+    const veo3Models = [
+      "veo-3.0-generate-001",      // VEO 3 standard
+      "veo-3.0-generate-preview",  // VEO 3 preview (if available)
+    ];
+    const veo2Models = [
+      "veo-2.0-generate-001",      // VEO 2 standard (text-only)
+    ];
+    
+    // For image-to-video: MUST use VEO 3
+    // For text-to-video: Can use either, prefer VEO 3
+    const modelsToTry = imageBase64 ? veo3Models : [...veo3Models, ...veo2Models];
+    
+    console.log(`🎬 Mode: ${imageBase64 ? 'IMAGE-TO-VIDEO' : 'TEXT-TO-VIDEO'}`);
+    console.log(`📋 Models to try: ${modelsToTry.join(', ')}`);
 
     let requestBody: any;
     
@@ -332,12 +342,12 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       console.log("🎬 IMAGE-TO-VIDEO mode via Vertex AI");
       console.log(`   Image size: ${Math.round(imageBase64.length / 1024)}KB`);
       console.log(`   MIME type: ${mimeType}`);
-      console.log(`   Motion prompt: ${motionPrompt.substring(0, 100)}...`);
+      console.log(`   Motion prompt: ${motionPrompt?.substring(0, 100) || 'none'}...`);
       console.log(`   Duration: ${durationSeconds}s`);
       
       requestBody = {
         instances: [{
-          prompt: motionPrompt,
+          prompt: motionPrompt || "Gentle cinematic motion with smooth camera movement",
           image: {
             bytesBase64Encoded: imageBase64,
             mimeType: mimeType,
@@ -353,11 +363,11 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     } else {
       // TEXT-TO-VIDEO mode
       console.log("📝 TEXT-TO-VIDEO mode via Vertex AI");
-      console.log(`   Prompt: ${motionPrompt.substring(0, 100)}...`);
+      console.log(`   Prompt: ${motionPrompt?.substring(0, 100) || 'none'}...`);
       
       requestBody = {
         instances: [{
-          prompt: motionPrompt,
+          prompt: motionPrompt || "Professional product showcase with smooth motion",
         }],
         parameters: {
           aspectRatio: "9:16",
@@ -368,64 +378,105 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       };
     }
 
-    console.log(`📤 Sending request to Vertex AI: ${endpoint}`);
-
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("❌ Vertex AI error:", response.status);
-      console.error("   Full error response:", errorText);
-      console.error("   Endpoint:", endpoint);
-      console.error("   Project:", projectId);
+    // Try each model in order until one works
+    let lastError: { status: number; text: string; model: string } | null = null;
+    
+    for (const model of modelsToTry) {
+      const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predictLongRunning`;
       
-      // Parse error for better debugging
-      let errorDetails = errorText;
+      console.log(`📤 Trying model: ${model}`);
+      console.log(`   Endpoint: ${endpoint}`);
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.ok) {
+        // Success! Return the result
+        const result = await response.json();
+        console.log(`✅ Model ${model} accepted the request`);
+        console.log("   Operation:", result.name);
+
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            name: result.name,
+            done: result.done || false,
+            metadata: result.metadata,
+            model: model,
+          }),
+        };
+      }
+      
+      // Model failed - log and try next
+      const errorText = await response.text();
+      console.warn(`⚠️ Model ${model} failed: ${response.status}`);
+      console.warn(`   Error: ${errorText.substring(0, 200)}`);
+      
+      lastError = { status: response.status, text: errorText, model };
+      
+      // If model not found (404), try next model
+      // If permission denied (403), try next model
+      // If other error, might still try next model
+      if (response.status === 404 || response.status === 403) {
+        console.log(`   Model ${model} not available, trying next...`);
+        continue;
+      }
+      
+      // For other errors like 400 (bad request), the request itself is wrong
+      // Log details but still try next model as format might differ
+      try {
+        const errorJson = JSON.parse(errorText);
+        console.warn(`   Error code: ${errorJson.error?.code}`);
+        console.warn(`   Error message: ${errorJson.error?.message}`);
+      } catch {}
+    }
+    
+    // All models failed
+    console.error("❌ All VEO models failed");
+    
+    if (lastError) {
+      let errorDetails = lastError.text;
       let errorCode = "";
       let errorReason = "";
       try {
-        const errorJson = JSON.parse(errorText);
-        errorDetails = errorJson.error?.message || errorText;
+        const errorJson = JSON.parse(lastError.text);
+        errorDetails = errorJson.error?.message || lastError.text;
         errorCode = errorJson.error?.code || "";
         errorReason = errorJson.error?.status || "";
-        console.error("   Error code:", errorCode);
-        console.error("   Error reason:", errorReason);
-        console.error("   Error message:", errorDetails);
       } catch {}
       
       return {
-        statusCode: response.status,
+        statusCode: lastError.status,
         headers,
         body: JSON.stringify({
-          error: `Vertex AI error: ${response.status}`,
+          error: `All VEO models failed. Last error: ${lastError.status}`,
           details: errorDetails,
           code: errorCode,
           reason: errorReason,
-          endpoint: endpoint,
+          modelsAttempted: modelsToTry,
+          lastModel: lastError.model,
           project: projectId,
+          hint: imageBase64 
+            ? "Image-to-video requires VEO 3. Ensure veo-3.0-generate-001 is enabled in your Google Cloud project."
+            : "Ensure VEO API is enabled in your Google Cloud project.",
         }),
       };
     }
-
-    const result = await response.json();
-    console.log("✅ Vertex AI request accepted");
-    console.log("   Operation:", result.name);
-
-    // Return the operation name for status polling
+    
+    // Should never reach here, but handle gracefully
     return {
-      statusCode: 200,
+      statusCode: 500,
       headers,
       body: JSON.stringify({
-        name: result.name,
-        done: result.done || false,
-        metadata: result.metadata,
+        error: "No VEO models available",
+        modelsAttempted: modelsToTry,
       }),
     };
   } catch (error: any) {
