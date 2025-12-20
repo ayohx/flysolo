@@ -12,7 +12,7 @@ import NotificationBell from './components/NotificationBell';
 import NotificationToast from './components/NotificationToast';
 import { ToastContainer, useToast } from './components/Toast';
 import { analyzeBrand, generateContentIdeas, generatePostImage, generatePostImageWithSource, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand, clearPendingRequests } from './services/geminiService';
-import { saveBrand, getBrandByUrl, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
+import { saveBrand, getBrandByUrl, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts, savePost, deleteSavedPost } from './services/supabaseService';
 // NOTE: saveBrandAssets and findRelevantAsset removed - AI was hallucinating fake image URLs
 import { cacheGeneratedContent, loadCachedContent, updateCachedPosts, clearCachedContent, clearExpiredCaches, shouldUseCachedContent, deletePostFromCache, purgeAllCachesForBrand } from './services/contentCacheService';
 import { Plus, X, Home, ArrowLeft } from 'lucide-react';
@@ -923,18 +923,34 @@ function App() {
   }, [generatedPosts, appState, brandProfile, loadingImages, generationAttempts, currentBrandId]);
 
   const handleLike = async (post: SocialPost) => {
-    // Add to liked posts
-    setLikedPosts(prev => [...prev, { ...post, status: 'liked' }]);
+    console.log(`💚 LIKING post ${post.id} - saving to database`);
     
-    // Remove from generated posts (optimistic update)
+    // Add to liked posts (optimistic update)
+    const likedPost = { ...post, status: 'liked' as const };
+    setLikedPosts(prev => [...prev, likedPost]);
+    
+    // Remove from generated posts
     setGeneratedPosts(prev => prev.filter(p => p.id !== post.id));
     
-    // Delete from cache with proper error handling
+    // CRITICAL: Save to Supabase database (permanent storage)
     if (currentBrandId) {
-      const deleted = await deletePostFromCache(currentBrandId, post.id);
-      if (!deleted) {
-        console.warn('⚠️ Cache sync failed for liked post - this is non-critical');
+      try {
+        const savedPost = await savePost(currentBrandId, post);
+        if (savedPost) {
+          console.log(`✅ Post ${post.id} saved to database permanently`);
+        } else {
+          console.error(`❌ Failed to save post ${post.id} to database`);
+          toast.error('Save failed', 'Could not save this post. Please try again.');
+        }
+      } catch (error) {
+        console.error('❌ Database save error:', error);
+        toast.error('Save failed', 'Could not save this post. Please try again.');
       }
+      
+      // Also remove from content cache (non-critical)
+      deletePostFromCache(currentBrandId, post.id).catch(e => {
+        console.warn('⚠️ Cache sync failed for liked post - this is non-critical');
+      });
     }
   };
 
@@ -1029,8 +1045,11 @@ function App() {
     setLikedPosts(prev => prev.map(p => p.id === updatedPost.id ? updatedPost : p));
   };
 
-  // Delete a post from liked posts
-  const handleDeletePost = (postId: string) => {
+  // Delete a post from liked posts - removes from both UI and database
+  const handleDeletePost = async (postId: string) => {
+    console.log(`🗑️ DELETING saved post ${postId} - removing from database`);
+    
+    // Remove from UI immediately (optimistic update)
     setLikedPosts(prev => prev.filter(p => p.id !== postId));
     
     // Also remove from pending videos if it was generating
@@ -1040,6 +1059,22 @@ function App() {
         next.delete(postId);
         return next;
       });
+    }
+    
+    // CRITICAL: Delete from Supabase database (permanent deletion)
+    if (currentBrandId) {
+      try {
+        const deleted = await deleteSavedPost(currentBrandId, postId);
+        if (deleted) {
+          console.log(`✅ Saved post ${postId} deleted from database`);
+        } else {
+          console.error(`❌ Failed to delete post ${postId} from database`);
+          toast.error('Delete failed', 'Could not delete from database. Please try again.');
+        }
+      } catch (error) {
+        console.error('❌ Database delete error:', error);
+        toast.error('Delete failed', 'Could not delete from database. Please try again.');
+      }
     }
   };
 

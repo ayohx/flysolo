@@ -487,6 +487,51 @@ export const updatePostSchedule = async (postId: string, scheduledDate: string):
   }
 };
 
+/**
+ * Delete a saved post from the database
+ */
+export const deleteSavedPost = async (brandId: string, postId: string): Promise<boolean> => {
+  const client = getSupabase();
+  
+  try {
+    // First, find the saved post by its post_json.id (not the database row id)
+    const { data: posts, error: findError } = await client
+      .from('saved_posts')
+      .select('id, post_json')
+      .eq('brand_id', brandId);
+    
+    if (findError) {
+      console.error('Failed to find saved post:', findError);
+      return false;
+    }
+    
+    // Find the post with matching post_json.id
+    const postToDelete = posts?.find(p => (p.post_json as any)?.id === postId);
+    
+    if (!postToDelete) {
+      console.log('Post not found in saved_posts (may already be deleted)');
+      return true; // Not an error if it's already gone
+    }
+    
+    // Delete the post
+    const { error: deleteError } = await client
+      .from('saved_posts')
+      .delete()
+      .eq('id', postToDelete.id);
+    
+    if (deleteError) {
+      console.error('Failed to delete saved post:', deleteError);
+      return false;
+    }
+    
+    console.log('🗑️ Saved post deleted from database');
+    return true;
+  } catch (e) {
+    console.error('Saved post delete error:', e);
+    return false;
+  }
+};
+
 // ============================================================================
 // DATABASE SCHEMA CREATION (Run once on first setup)
 // ============================================================================
