@@ -7,7 +7,8 @@ export interface BrandProfile {
   strategy: string;
   products: string; // Broad description
   services: string[]; // Specific list of 5-20 items (e.g. "Bali Tour", "Flight Booking")
-  imageAssets?: Array<{ url: string; label: string }>; // Scraped images mapped to products
+  // imageAssets DEPRECATED - AI hallucinated fake URLs, now using Imagen for all images
+  imageAssets?: Array<{ url: string; label: string }>; // DEPRECATED: kept for legacy data only
   socialHandles?: string[]; // URLs or handles found (Optional)
   visualStyle: string; // Art direction
   essence?: string; // One-line summary of what the business does

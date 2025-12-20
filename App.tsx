@@ -12,7 +12,8 @@ import NotificationBell from './components/NotificationBell';
 import NotificationToast from './components/NotificationToast';
 import { ToastContainer, useToast } from './components/Toast';
 import { analyzeBrand, generateContentIdeas, generatePostImage, generatePostImageWithSource, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand, clearPendingRequests } from './services/geminiService';
-import { saveBrand, saveBrandAssets, getBrandByUrl, findRelevantAsset, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
+import { saveBrand, getBrandByUrl, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
+// NOTE: saveBrandAssets and findRelevantAsset removed - AI was hallucinating fake image URLs
 import { cacheGeneratedContent, loadCachedContent, updateCachedPosts, clearCachedContent, clearExpiredCaches, shouldUseCachedContent } from './services/contentCacheService';
 import { Plus, X, Home, ArrowLeft } from 'lucide-react';
 
@@ -501,11 +502,8 @@ function App() {
         if (storedBrand) {
           console.log('✅ Background brand saved to Supabase:', storedBrand.id);
           
-          // Save discovered image assets
-          if (profile.imageAssets && profile.imageAssets.length > 0) {
-            const assetCount = await saveBrandAssets(storedBrand.id, profile.imageAssets);
-            console.log(`✅ Saved ${assetCount} image assets to Supabase`);
-          }
+          // NOTE: saveBrandAssets removed - AI was hallucinating fake URLs
+          // Images are now generated fresh by Imagen for each post
           
           // Refresh brands list
           const brands = await listBrands();
@@ -639,11 +637,8 @@ function App() {
           setCurrentBrandId(storedBrand.id);
           console.log('✅ Brand saved to Supabase:', storedBrand.id);
           
-          // Save discovered image assets
-          if (profile.imageAssets && profile.imageAssets.length > 0) {
-            const assetCount = await saveBrandAssets(storedBrand.id, profile.imageAssets);
-            console.log(`✅ Saved ${assetCount} image assets to Supabase`);
-          }
+          // NOTE: saveBrandAssets removed - AI was hallucinating fake URLs
+          // Images are now generated fresh by Imagen for each post
           
           // Refresh brands list
           const brands = await listBrands();
@@ -735,38 +730,11 @@ function App() {
       let imageSource: 'imagen3' | 'gemini' | 'pexels' | 'placeholder' | 'unknown' = 'unknown';
       let retries = 0;
       
-      // PRIORITY 1: Check Supabase for real product images
-      // CRITICAL: Only use if URL is validated (many brand assets have fake/hallucinated URLs)
-      if (activeBrandId) {
-        try {
-          // Extract product name from caption/visual prompt for matching
-          const searchTerm = post.caption.split(' ').slice(0, 5).join(' ');
-          const realAsset = await findRelevantAsset(activeBrandId, searchTerm);
-          
-          if (realAsset && realAsset.url) {
-            // Validate URL: must start with https:// and not be a hallucinated domain URL
-            const isValidUrl = realAsset.url.startsWith('https://') && 
-              (realAsset.url.includes('images.pexels.com') || 
-               realAsset.url.includes('supabase.co') ||
-               realAsset.url.includes('cloudinary.com') ||
-               realAsset.url.includes('unsplash.com') ||
-               realAsset.url.startsWith('data:image/'));
-            
-            if (isValidUrl) {
-              console.log(`🎯 Using REAL product image for post ${post.id}:`, realAsset.label);
-              imageUrl = realAsset.url;
-              imageSource = 'imagen3'; // Treat real assets as AI-quality
-            } else {
-              console.warn(`⚠️ Skipping asset with invalid/fake URL: ${realAsset.url.substring(0, 50)}...`);
-            }
-          }
-        } catch (e) {
-          console.warn('Asset lookup failed, falling back to AI:', e);
-        }
-      }
+      // NOTE: findRelevantAsset removed - AI was hallucinating fake image URLs
+      // All images are now generated fresh by Imagen based on content topics
       
-      // PRIORITY 2: Generate with AI (with source tracking)
-      if (!imageUrl) {
+      // Generate with AI (with source tracking)
+      {
         while (!imageUrl && retries < MAX_RETRIES) {
           try {
             // Use the enhanced function that tracks source

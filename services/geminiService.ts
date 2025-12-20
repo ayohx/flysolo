@@ -150,7 +150,7 @@ const normaliseBrandProfile = (profile: BrandProfile): BrandProfile => {
     strategy: safeStrategy,
     essence: (profile.essence || '').trim() || profile.name,
     logoUrl: profile.logoUrl,
-    imageAssets: profile.imageAssets || [],
+    // imageAssets removed - all images now generated fresh by Imagen
   };
 };
 
@@ -399,18 +399,9 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
       },
       essence: { type: Type.STRING, description: "One sentence summary of what this business does" },
       confidence: { type: Type.NUMBER, description: "Confidence score 0-100 on data quality" },
-      logoUrl: { type: Type.STRING, description: "URL to the official company logo (transparent PNG preferred)" },
-      imageAssets: { 
-        type: Type.ARRAY, 
-        items: { 
-          type: Type.OBJECT,
-          properties: {
-            url: { type: Type.STRING },
-            label: { type: Type.STRING }
-          }
-        },
-        description: "List of 5-10 high-quality product or brand image URLs found on the site"
-      }
+      logoUrl: { type: Type.STRING, description: "URL to the official company logo (transparent PNG preferred)" }
+      // NOTE: imageAssets removed - AI cannot reliably find real image URLs on websites
+      // All images are now generated fresh by Imagen based on content topics
     },
     required: ["name", "industry", "products", "services", "socialHandles", "colors", "vibe", "visualStyle", "competitors", "strategy", "essence", "confidence"],
   };
@@ -427,15 +418,8 @@ export const analyzeBrand = async (url: string): Promise<BrandProfile> => {
        - Find the official company logo URL.
        - Prefer transparent PNG or SVG if available.
        - Look for: 'link[rel="icon"]', 'meta[property="og:image"]', or scrape the logo from the homepage.
-
-    2. IMAGE ASSETS (CRITICAL):
-       - Find 5-10 HIGH-QUALITY image URLs representing their key products or services.
-       - Look for: 'meta[property="og:image"]', product gallery images, hero banner images.
-       - Exclude: tiny icons, social media button images, generic stock photos.
-       - Format: Return valid URLs starting with http/https.
-       - Label each image with what it shows (e.g., "Air Max 270 Black", "Homepage Hero").
     
-    3. SERVICES/PRODUCTS (MINIMUM 10 ITEMS - THIS IS MANDATORY):
+    2. SERVICES/PRODUCTS (MINIMUM 10 ITEMS - THIS IS MANDATORY):
        - Find SPECIFIC product names, service offerings, or packages
        - DO NOT use generic categories like "footwear", "services", "products"
        - BE SPECIFIC: exact names, model numbers, package titles
@@ -1566,19 +1550,8 @@ export const softRefreshBrand = async (
       }
     }
     
-    // Add new image assets
-    if (refreshData.newImageAssets && refreshData.newImageAssets.length > 0) {
-      const existingAssets = currentProfile.imageAssets || [];
-      const existingUrls = existingAssets.map(a => a.url.toLowerCase());
-      const newAssets = refreshData.newImageAssets.filter(
-        a => !existingUrls.includes(a.url.toLowerCase())
-      );
-      
-      if (newAssets.length > 0) {
-        updatedProfile.imageAssets = [...existingAssets, ...newAssets];
-        changes.push(`Found ${newAssets.length} new images`);
-      }
-    }
+    // NOTE: imageAssets logic removed - AI cannot reliably find real URLs
+    // All images are now generated fresh by Imagen
     
     // Append strategy updates if significant
     if (refreshData.strategyUpdates && refreshData.strategyUpdates.length > 50) {
