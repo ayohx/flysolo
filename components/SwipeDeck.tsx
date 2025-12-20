@@ -61,13 +61,18 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
   const cardRef = useRef<HTMLDivElement>(null);
   const dragThreshold = 100; // Pixels to trigger swipe
   
+  // Cooldown tracking to prevent rapid-fire API calls
+  const lastFetchTimeRef = useRef<number>(0);
+  const FETCH_COOLDOWN_MS = 30000; // 30 seconds minimum between fetches
+  const LOW_CARDS_THRESHOLD = 3; // Reduced from 5 to be more conservative
+  
   const remainingPosts = posts.length - currentIndex;
   const maxVisibleCards = 5;
   const isDeckEmpty = currentIndex >= posts.length;
   
   // CRITICAL FIX: Prevent swiping last card when generating
   // This completely eliminates the race condition that causes blank screens
-  const isLowOnCards = remainingPosts <= 3;
+  const isLowOnCards = remainingPosts <= LOW_CARDS_THRESHOLD;
   const canSwipe = !isDeckEmpty && !(isLowOnCards && isGeneratingMore);
 
   // Animate counter when cards are added
@@ -76,10 +81,21 @@ const SwipeDeck: React.FC<SwipeDeckProps> = ({
   }, [remainingPosts]);
 
   // Infinite Scroll Trigger - Optimised for cost efficiency
-  // Only trigger when down to 5 cards to save API credits
+  // CRITICAL: Only trigger when TRULY low on cards (3 or fewer) with 30-second cooldown
   useEffect(() => {
-    if (remainingPosts <= 5 && !isGeneratingMore && remainingPosts > 0) {
-      console.log("🔄 Low on cards (5 left), fetching more... (remaining:", remainingPosts, ")");
+    // Only trigger when down to threshold cards AND not already generating AND deck not empty
+    if (remainingPosts <= LOW_CARDS_THRESHOLD && !isGeneratingMore && remainingPosts > 0) {
+      const now = Date.now();
+      const timeSinceLastFetch = now - lastFetchTimeRef.current;
+      
+      // Enforce cooldown to prevent rapid-fire API calls
+      if (timeSinceLastFetch < FETCH_COOLDOWN_MS) {
+        console.log(`⏳ Fetch cooldown: ${Math.round((FETCH_COOLDOWN_MS - timeSinceLastFetch) / 1000)}s remaining`);
+        return;
+      }
+      
+      console.log(`🔄 Low on cards (${remainingPosts} left), fetching more...`);
+      lastFetchTimeRef.current = now;
       onFetchMore();
     }
   }, [remainingPosts, isGeneratingMore, onFetchMore]);

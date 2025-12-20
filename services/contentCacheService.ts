@@ -194,6 +194,7 @@ export const updateCachedImage = async (
 
 /**
  * Bulk update cached posts (more efficient than updating one at a time)
+ * Now with proper error logging instead of silent failures
  */
 export const updateCachedPosts = async (
   brandId: string,
@@ -208,20 +209,122 @@ export const updateCachedPosts = async (
       .from('brand_content_cache')
       .update({ 
         posts_json: posts,
+        post_count: posts.length,
         images_loaded: imagesLoaded,
       })
       .eq('brand_id', brandId);
     
     if (error) {
-      console.error('Failed to update cached posts:', error);
+      console.error('❌ Failed to update cached posts:', error.code, error.message);
       return false;
     }
     
+    console.log(`📝 Cache updated: ${posts.length} posts (${imagesLoaded} with images)`);
     return true;
   } catch (e) {
-    console.error('Cache posts update error:', e);
+    console.error('❌ Cache posts update error:', e);
     return false;
   }
+};
+
+/**
+ * Delete a specific post from the cache by ID
+ * Used when user swipes left (rejects) a post
+ * 
+ * CRITICAL: This must work reliably to prevent rejected posts from reappearing
+ * 
+ * @param brandId - The brand's UUID
+ * @param postId - The post ID to remove
+ * @param maxRetries - Maximum retry attempts (default 3)
+ * @returns true if deletion succeeded, false otherwise
+ */
+export const deletePostFromCache = async (
+  brandId: string,
+  postId: string,
+  maxRetries: number = 3
+): Promise<boolean> => {
+  const client = getSupabase();
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Step 1: Load current cache
+      const { data, error: loadError } = await client
+        .from('brand_content_cache')
+        .select('posts_json, images_loaded')
+        .eq('brand_id', brandId)
+        .single();
+      
+      if (loadError) {
+        // No cache exists - that's fine, nothing to delete
+        if (loadError.code === 'PGRST116' || loadError.code === '42P01') {
+          console.log('📭 No cache exists, nothing to delete');
+          return true;
+        }
+        console.error(`❌ Cache load failed (attempt ${attempt}/${maxRetries}):`, loadError.message);
+        if (attempt < maxRetries) {
+          await sleep(1000 * attempt); // Exponential backoff
+          continue;
+        }
+        return false;
+      }
+      
+      if (!data || !data.posts_json) {
+        console.log('📭 Cache empty, nothing to delete');
+        return true;
+      }
+      
+      // Step 2: Filter out the deleted post
+      const currentPosts = data.posts_json as SocialPost[];
+      const updatedPosts = currentPosts.filter(p => p.id !== postId);
+      
+      // Check if post was actually in the cache
+      if (updatedPosts.length === currentPosts.length) {
+        console.log(`⚠️ Post ${postId} not found in cache (already deleted?)`);
+        return true;
+      }
+      
+      // Step 3: Update with filtered posts
+      const imagesLoaded = updatedPosts.filter(p => p.imageUrl && !p.imageUrl.includes('svg+xml')).length;
+      
+      const { error: updateError } = await client
+        .from('brand_content_cache')
+        .update({ 
+          posts_json: updatedPosts,
+          post_count: updatedPosts.length,
+          images_loaded: imagesLoaded,
+        })
+        .eq('brand_id', brandId);
+      
+      if (updateError) {
+        console.error(`❌ Cache update failed (attempt ${attempt}/${maxRetries}):`, updateError.code, updateError.message);
+        if (attempt < maxRetries) {
+          await sleep(1000 * attempt); // Exponential backoff
+          continue;
+        }
+        return false;
+      }
+      
+      console.log(`🗑️ Post ${postId.slice(0, 8)}... deleted from cache (${updatedPosts.length} posts remaining)`);
+      return true;
+      
+    } catch (e) {
+      console.error(`❌ Cache deletion error (attempt ${attempt}/${maxRetries}):`, e);
+      if (attempt < maxRetries) {
+        await sleep(1000 * attempt);
+        continue;
+      }
+      return false;
+    }
+  }
+  
+  return false;
+};
+
+/**
+ * Helper: Sleep for a specified duration
+ */
+const sleep = (ms: number): Promise<void> => {
+  return new Promise(resolve => setTimeout(resolve, ms));
 };
 
 /**

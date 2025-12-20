@@ -14,7 +14,7 @@ import { ToastContainer, useToast } from './components/Toast';
 import { analyzeBrand, generateContentIdeas, generatePostImage, generatePostImageWithSource, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand, clearPendingRequests } from './services/geminiService';
 import { saveBrand, getBrandByUrl, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
 // NOTE: saveBrandAssets and findRelevantAsset removed - AI was hallucinating fake image URLs
-import { cacheGeneratedContent, loadCachedContent, updateCachedPosts, clearCachedContent, clearExpiredCaches, shouldUseCachedContent } from './services/contentCacheService';
+import { cacheGeneratedContent, loadCachedContent, updateCachedPosts, clearCachedContent, clearExpiredCaches, shouldUseCachedContent, deletePostFromCache } from './services/contentCacheService';
 import { Plus, X, Home, ArrowLeft } from 'lucide-react';
 
 // LocalStorage keys - MINIMAL storage only (no large data!)
@@ -63,6 +63,10 @@ function App() {
   const [likedPosts, setLikedPosts] = useState<SocialPost[]>([]);
   const [loadingImages, setLoadingImages] = useState<Set<string>>(new Set());
   const [isHydrated, setIsHydrated] = useState(false);
+  
+  // Track image generation attempts to prevent infinite loops (max 2 attempts per post)
+  const [generationAttempts, setGenerationAttempts] = useState<Map<string, number>>(new Map());
+  const MAX_GENERATION_ATTEMPTS = 2;
   
   // Brand management state - MUST be before init useEffect that uses them
   const [currentBrandId, setCurrentBrandId] = useState<string | null>(null);
@@ -192,6 +196,7 @@ function App() {
           // Clear previous brand state
           setGeneratedPosts([]);
           setLikedPosts([]);
+          setGenerationAttempts(new Map()); // Reset generation tracking
           setIsGeneratingMore(true);
           setAppState(AppState.SWIPING);
           setCurrentBrandId(matchingBrand.id);
@@ -277,6 +282,7 @@ function App() {
     setCurrentBrandId(null);
     setGeneratedPosts([]);
     setLikedPosts([]);
+    setGenerationAttempts(new Map()); // Reset generation tracking
     setAppState(AppState.ONBOARDING);
     resetAnalysisStages();
   };
@@ -288,6 +294,12 @@ function App() {
   const [customPrompt, setCustomPrompt] = useState('');
   // currentBrandId and allBrands moved to top of component (before init useEffect)
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Ref to track current app state for async operations (avoids stale closure issues)
+  const appStateRef = React.useRef<AppState>(appState);
+  React.useEffect(() => {
+    appStateRef.current = appState;
+  }, [appState]);
   
   // Toast notifications
   const toast = useToast();
@@ -653,11 +665,22 @@ function App() {
       // Clear current analysis URL
       setCurrentAnalysisUrl(null);
       
-      // Check if user moved analysis to background (not on ANALYZING screen anymore)
-      // We need to check the ACTUAL current state, not a stale closure value
-      const wasMovedToBackground = pendingAnalyses.has(normalisedUrl);
+      // CRITICAL FIX: Use ref to check CURRENT app state, not stale closure value
+      // This fixes the bug where analysis hangs at 100% instead of navigating
+      const currentAppState = appStateRef.current;
+      const isStillOnAnalysisScreen = currentAppState === AppState.ANALYZING;
       
-      if (wasMovedToBackground) {
+      // Also check if this URL is in pendingAnalyses (user explicitly moved to background)
+      const wasExplicitlyBackgrounded = pendingAnalyses.has(normalisedUrl);
+      
+      console.log('📊 Analysis complete check:', {
+        currentAppState,
+        isStillOnAnalysisScreen,
+        wasExplicitlyBackgrounded,
+        normalisedUrl: normalisedUrl.slice(0, 30),
+      });
+      
+      if (wasExplicitlyBackgrounded && !isStillOnAnalysisScreen) {
         // User clicked "Continue in Background" - update pending and show notification
         updatePendingStatus(normalisedUrl, 'complete', { profile, posts });
         
@@ -672,22 +695,35 @@ function App() {
         // Don't navigate - user is viewing brand selector or adding another brand
         console.log('✅ Background analysis complete for:', profile.name);
       } else {
-        // User stayed on the analysis screen - navigate to swiping
+        // User stayed on the analysis screen (or did a hard refresh) - navigate to swiping
+        console.log('✅ Foreground analysis complete - navigating to swiping');
+        
+        // Clean up any stale pending analysis entry
+        if (pendingAnalyses.has(normalisedUrl)) {
+          setPendingAnalyses(prev => {
+            const updated = new Map(prev);
+            updated.delete(normalisedUrl);
+            return updated;
+          });
+        }
+        
         setAppState(AppState.SWIPING);
       }
       
     } catch (error: any) {
       console.error("Analysis failed:", error);
       
-      // Check if user moved to background
-      const wasMovedToBackground = pendingAnalyses.has(normalisedUrl);
+      // Check if user moved to background using ref (not stale closure)
+      const currentAppState = appStateRef.current;
+      const isStillOnAnalysisScreen = currentAppState === AppState.ANALYZING;
+      const wasExplicitlyBackgrounded = pendingAnalyses.has(normalisedUrl) && !isStillOnAnalysisScreen;
       
       // Mark stages as error (only relevant if user is still viewing)
       setAnalysisStages(prev => prev.map(s => 
         s.status === 'loading' ? { ...s, status: 'error' } : s
       ));
       
-      if (wasMovedToBackground) {
+      if (wasExplicitlyBackgrounded) {
         // Update pending analysis status
         updatePendingStatus(normalisedUrl, 'error', { 
           error: error.message || 'Analysis failed' 
@@ -722,7 +758,23 @@ function App() {
     const activeBrandId = overrideBrandId !== undefined ? overrideBrandId : currentBrandId;
     
     postsToGen.forEach(async (post) => {
+      // Skip if post already has an image, is currently loading, or is marked as failed
       if (post.imageUrl || loadingImages.has(post.id)) return;
+      if (post.imageSource === 'placeholder') return; // Already failed, don't retry
+      
+      // Check if we've exceeded max generation attempts for this post
+      const attempts = generationAttempts.get(post.id) || 0;
+      if (attempts >= MAX_GENERATION_ATTEMPTS) {
+        console.log(`⛔ Post ${post.id.slice(0, 8)}... exceeded max attempts (${attempts}), skipping`);
+        return;
+      }
+      
+      // Increment attempt counter
+      setGenerationAttempts(prev => {
+        const next = new Map(prev);
+        next.set(post.id, attempts + 1);
+        return next;
+      });
 
       setLoadingImages(prev => new Set(prev).add(post.id));
       
@@ -777,16 +829,9 @@ function App() {
       }
       
       // Update posts with both URL and source tracking
-      setGeneratedPosts(current => {
-        const updated = current.map(p => p.id === post.id ? { ...p, imageUrl, imageSource } : p);
-        
-        // Update cache with new image (fire and forget)
-        if (activeBrandId && imageUrl) {
-          updateCachedPosts(activeBrandId, updated).catch(() => {});
-        }
-        
-        return updated;
-      });
+      setGeneratedPosts(current => 
+        current.map(p => p.id === post.id ? { ...p, imageUrl, imageSource } : p)
+      );
       
       // Also update liked posts if it exists there
       setLikedPosts(current =>
@@ -798,14 +843,45 @@ function App() {
         next.delete(post.id);
         return next;
       });
+      
+      // Update cache AFTER state update, with proper error logging
+      // NOTE: We don't await this to avoid blocking the UI, but we DO log errors
+      if (activeBrandId && imageUrl) {
+        // Get current posts to include in cache update
+        setGeneratedPosts(currentPosts => {
+          // Fire cache update with the current state (includes this post's new image)
+          updateCachedPosts(activeBrandId, currentPosts)
+            .then(success => {
+              if (!success) {
+                console.warn(`⚠️ Cache update failed for post ${post.id.slice(0, 8)}... - image may not persist`);
+              }
+            })
+            .catch(err => {
+              console.error(`❌ Cache update error for post ${post.id.slice(0, 8)}...:`, err);
+            });
+          return currentPosts; // Return unchanged (we're just using this to get current state)
+        });
+      }
     });
   };
 
   // Eager load images as user swipes - load up to 3 in parallel
+  // CRITICAL: Exclude posts that have already failed (placeholder) or exceeded attempts
   useEffect(() => {
     if (appState === AppState.SWIPING && brandProfile) {
-      // Find pending images that aren't loading
-      const pending = generatedPosts.filter(p => !p.imageUrl && !loadingImages.has(p.id));
+      // Find pending images that:
+      // 1. Don't have an image yet
+      // 2. Aren't currently loading
+      // 3. Haven't already been marked as placeholder (failed)
+      // 4. Haven't exceeded max generation attempts
+      const pending = generatedPosts.filter(p => {
+        if (p.imageUrl) return false; // Already has image
+        if (loadingImages.has(p.id)) return false; // Currently loading
+        if (p.imageSource === 'placeholder') return false; // Already failed
+        const attempts = generationAttempts.get(p.id) || 0;
+        if (attempts >= MAX_GENERATION_ATTEMPTS) return false; // Exceeded max attempts
+        return true;
+      });
       
       // Allow up to 3 concurrent image loads
       const currentlyLoading = loadingImages.size;
@@ -815,32 +891,37 @@ function App() {
         startImageGeneration(pending.slice(0, canLoad), brandProfile);
       }
     }
-  }, [generatedPosts, appState, brandProfile, loadingImages]);
+  }, [generatedPosts, appState, brandProfile, loadingImages, generationAttempts]);
 
-  const handleLike = (post: SocialPost) => {
+  const handleLike = async (post: SocialPost) => {
+    // Add to liked posts
     setLikedPosts(prev => [...prev, { ...post, status: 'liked' }]);
     
-    // Remove from generated posts and update cache
-    setGeneratedPosts(prev => {
-      const updated = prev.filter(p => p.id !== post.id);
-      // Update cache with remaining posts
-      if (currentBrandId) {
-        updateCachedPosts(currentBrandId, updated);
+    // Remove from generated posts (optimistic update)
+    setGeneratedPosts(prev => prev.filter(p => p.id !== post.id));
+    
+    // Delete from cache with proper error handling
+    if (currentBrandId) {
+      const deleted = await deletePostFromCache(currentBrandId, post.id);
+      if (!deleted) {
+        console.warn('⚠️ Cache sync failed for liked post - this is non-critical');
       }
-      return updated;
-    });
+    }
   };
 
-  const handleReject = (post: SocialPost) => {
-    // Remove from generated posts and update cache
-    setGeneratedPosts(prev => {
-      const updated = prev.filter(p => p.id !== post.id);
-      // Update cache with remaining posts
-      if (currentBrandId) {
-        updateCachedPosts(currentBrandId, updated);
+  const handleReject = async (post: SocialPost) => {
+    // Remove from generated posts immediately (optimistic update)
+    setGeneratedPosts(prev => prev.filter(p => p.id !== post.id));
+    
+    // Delete from cache with proper error handling (not fire-and-forget!)
+    if (currentBrandId) {
+      const deleted = await deletePostFromCache(currentBrandId, post.id);
+      if (!deleted) {
+        console.error(`❌ Failed to delete post ${post.id} from cache - may reappear on refresh`);
+        // Optionally show toast to user
+        toast.error('Cache sync failed', 'This post may reappear after refresh. Try swiping again.');
       }
-      return updated;
-    });
+    }
   };
 
   const handleFetchMore = async () => {
@@ -1083,6 +1164,7 @@ function App() {
     // CLEAR PREVIOUS BRAND STATE IMMEDIATELY - prevents showing stale content
     setGeneratedPosts([]);
     setLikedPosts([]);
+    setGenerationAttempts(new Map()); // Reset generation tracking
     setBrandProfile(null);
     
     // NAVIGATE IMMEDIATELY to brand-specific URL
@@ -1163,6 +1245,7 @@ function App() {
     setBrandProfile(null);
     setGeneratedPosts([]);
     setLikedPosts([]);
+    setGenerationAttempts(new Map()); // Reset generation tracking
     setCurrentBrandId(null);
     resetAnalysisStages();
     setAppState(AppState.ONBOARDING);
@@ -1172,6 +1255,7 @@ function App() {
     console.log('🔄 Hard refresh for:', brand.name);
     // Clear posts but keep the brand context
     setGeneratedPosts([]);
+    setGenerationAttempts(new Map()); // Reset generation tracking
     // Keep liked posts - they're the user's work
     
     // Re-analyze the brand from scratch
@@ -1243,6 +1327,7 @@ function App() {
     // Clear brand state to prevent stale content showing
     setGeneratedPosts([]);
     setLikedPosts([]);
+    setGenerationAttempts(new Map()); // Reset generation tracking
     setBrandProfile(null);
     setCurrentBrandId(null);
     

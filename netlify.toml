@@ -6,7 +6,14 @@
 [build.environment]
   NODE_VERSION = "18"
 
-# Handle SPA routing
+# CRITICAL: Exclude Netlify functions from SPA redirect
+# This MUST come BEFORE the catch-all SPA redirect
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# Handle SPA routing for frontend
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -17,5 +24,6 @@
 #   - VITE_GEMINI_API_KEY
 #   - VITE_IMAGEN_API_KEY  
 #   - VITE_VEO_API_KEY
-#   - VEO_API_KEY (for serverless function)
+#   - GOOGLE_CLOUD_PROJECT_ID (for serverless function)
+#   - GOOGLE_SERVICE_ACCOUNT_KEY (for serverless function - JSON service account key)
 

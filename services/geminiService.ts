@@ -1752,8 +1752,26 @@ export const generatePostVideo = async (
     });
     
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `Netlify function error: ${response.status}`);
+      // Handle specific error cases
+      if (response.status === 404) {
+        console.error("❌ Netlify function not found (404) - Check if function is deployed");
+        console.error("   Ensure netlify.toml has 'functions = netlify/functions'");
+        console.error("   Ensure package @netlify/functions is installed");
+        console.error("   Run 'netlify deploy' to deploy functions");
+        throw new Error('Video generation function not deployed. Please check Netlify configuration.');
+      }
+      
+      let errorMessage = `Netlify function error: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorData.details || errorMessage;
+        console.error("❌ Netlify function error:", errorData);
+      } catch {
+        // Could not parse JSON error
+        console.error("❌ Netlify function error:", response.status, response.statusText);
+      }
+      
+      throw new Error(errorMessage);
     }
     
     return await response.json();
@@ -1950,8 +1968,16 @@ export const checkVideoStatus = async (operationName: string): Promise<{
     if (!response.ok) {
       console.error("Video status check failed:", response.status, response.statusText);
       if (response.status === 404) {
-        return { status: 'failed', failureReason: 'Operation not found' };
+        // 404 can mean:
+        // 1. Netlify function not deployed (check netlify.toml and redeploy)
+        // 2. Operation name not found (VEO operation expired or invalid)
+        console.error("❌ 404 Error - Check if Netlify function is deployed and GOOGLE_CLOUD_PROJECT_ID/GOOGLE_SERVICE_ACCOUNT_KEY are set");
+        return { 
+          status: 'failed', 
+          failureReason: 'Video operation not found. The function may not be deployed or the operation expired.'
+        };
       }
+      // For other errors, allow retry
       return { status: 'pending' };
     }
     
