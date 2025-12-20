@@ -2,10 +2,14 @@ import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 import { GoogleAuth } from "google-auth-library";
 
 interface VideoRequest {
+  action?: "generate" | "status";
+  // For generate action
   imageBase64?: string;
   mimeType?: string;
-  motionPrompt: string;
-  duration: "5s" | "10s";
+  motionPrompt?: string;
+  duration?: "5s" | "10s";
+  // For status action
+  operationName?: string;
 }
 
 /**
@@ -50,7 +54,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
   };
 
   try {
-    const { imageBase64, mimeType, motionPrompt, duration } = JSON.parse(
+    const { action = "generate", imageBase64, mimeType, motionPrompt, duration, operationName } = JSON.parse(
       event.body || "{}"
     ) as VideoRequest;
 
@@ -103,6 +107,108 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     }
 
     console.log("✅ GCP authentication successful");
+
+    // Handle STATUS action - check operation status
+    if (action === "status" && operationName) {
+      console.log("🔍 Checking operation status:", operationName);
+      
+      const location = "us-central1";
+      // The operationName is like "projects/xxx/locations/xxx/.../operations/xxx"
+      const statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
+      
+      const statusResponse = await fetch(statusEndpoint, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+        },
+      });
+      
+      if (!statusResponse.ok) {
+        const errorText = await statusResponse.text();
+        console.error("❌ Status check failed:", statusResponse.status, errorText);
+        return {
+          statusCode: statusResponse.status,
+          headers,
+          body: JSON.stringify({
+            status: "error",
+            error: `Status check failed: ${statusResponse.status}`,
+            details: errorText,
+          }),
+        };
+      }
+      
+      const statusResult = await statusResponse.json();
+      console.log("📊 Operation status:", JSON.stringify(statusResult, null, 2));
+      
+      if (statusResult.done) {
+        // Check for video in response
+        const videoUri = statusResult.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
+          || statusResult.response?.generatedVideos?.[0]?.video?.uri;
+        
+        if (videoUri) {
+          console.log("✅ Video ready:", videoUri);
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+              status: "success",
+              done: true,
+              videoUrl: videoUri,
+            }),
+          };
+        }
+        
+        // Check for error
+        if (statusResult.error) {
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+              status: "failed",
+              done: true,
+              error: statusResult.error.message || "Video generation failed",
+            }),
+          };
+        }
+        
+        // Check for content filter
+        const raiCount = statusResult.response?.generateVideoResponse?.raiMediaFilteredCount;
+        if (raiCount > 0) {
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+              status: "failed",
+              done: true,
+              error: "Video content was filtered by safety settings. Try a different prompt.",
+            }),
+          };
+        }
+        
+        // Done but no video - unknown failure
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            status: "failed",
+            done: true,
+            error: "Video generation completed but no video was returned",
+            rawResponse: statusResult.response,
+          }),
+        };
+      }
+      
+      // Still processing
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          status: "pending",
+          done: false,
+          metadata: statusResult.metadata,
+        }),
+      };
+    }
     
     // Duration in seconds (VEO supports 5-8 seconds)
     const durationSeconds = duration === "5s" ? 5 : 8;

@@ -1954,88 +1954,47 @@ export const generatePostVideo = async (
 /**
  * Check the status of a video generation operation.
  * VEO video generation is async - call this to poll for completion.
- * Uses direct API call since the SDK's operations API has issues.
+ * Routes through Netlify serverless function to bypass CORS.
  */
 export const checkVideoStatus = async (operationName: string): Promise<{
   status: 'pending' | 'success' | 'failed';
   videoUrl?: string;
   failureReason?: string;
 }> => {
-  const apiKey = process.env.VEO_API_KEY || process.env.API_KEY;
-  
   try {
-    // Use direct API call to check operation status
-    // The operationName is like "models/veo-2.0-generate-001/operations/xxxxx"
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`,
-      { method: 'GET' }
-    );
+    // Route through Netlify function to bypass CORS
+    console.log("🔍 Checking video status via Netlify function:", operationName);
+    
+    const response = await fetch('/.netlify/functions/generate-video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'status',
+        operationName: operationName,
+      }),
+    });
     
     if (!response.ok) {
       console.error("Video status check failed:", response.status, response.statusText);
-      // If 404, operation might have expired or doesn't exist
       if (response.status === 404) {
-        return { status: 'failed' };
+        return { status: 'failed', failureReason: 'Operation not found' };
       }
-      // For other errors, assume still pending (might be transient)
       return { status: 'pending' };
     }
     
     const result = await response.json();
-    console.log("Video operation status:", result);
+    console.log("📊 Video operation status:", result);
     
-    if (result.done) {
-      // Check for video in response - VEO uses different response structures
-      // Try the new structure first (generateVideoResponse.generatedSamples)
-      let videoUri = result.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
-      
-      // Fallback to alternative structures
-      if (!videoUri) {
-        videoUri = result.response?.generatedVideos?.[0]?.video?.uri;
-      }
-      
-      if (videoUri) {
-        // Append API key to video URL for browser access
-        // VEO video URLs require authentication
-        const authenticatedUrl = videoUri.includes('?') 
-          ? `${videoUri}&key=${apiKey}` 
-          : `${videoUri}?key=${apiKey}`;
-        
-        console.log("Video ready:", authenticatedUrl);
-        return { status: 'success', videoUrl: authenticatedUrl };
-      }
-      
-      // Check for error in result
-      if (result.error) {
-        console.error("VEO returned error:", result.error);
-        return { 
-          status: 'failed', 
-          failureReason: result.error.message || 'Video generation failed' 
-        };
-      }
-      
-      // Check for RAI content filter rejection (common failure mode)
-      const generateVideoResponse = result.response?.generateVideoResponse;
-      if (generateVideoResponse?.raiMediaFilteredCount > 0) {
-        const reasons = generateVideoResponse.raiMediaFilteredReasons || [];
-        const reason = reasons[0] || 'Content was filtered by safety settings';
-        console.error("Video filtered by RAI:", reason);
-        return { 
-          status: 'failed', 
-          failureReason: 'Video content was filtered by safety settings. Try a prompt without people or faces.'
-        };
-      }
-      
-      // Check if response exists and log its full structure
-      if (result.response) {
-        console.log("VEO response structure:", JSON.stringify(result.response, null, 2));
-      }
-      
-      // If done but no video, it failed (likely content moderation or quota)
-      console.error("Video operation done but no video - possible content rejection");
+    if (result.status === 'success' && result.videoUrl) {
+      console.log("✅ Video ready:", result.videoUrl);
+      return { status: 'success', videoUrl: result.videoUrl };
+    }
+    
+    if (result.status === 'failed') {
+      console.error("❌ Video generation failed:", result.error);
       return { 
-        status: 'failed',
-        failureReason: 'Video generation completed but no video was produced. The content may have been filtered.'
+        status: 'failed', 
+        failureReason: result.error || 'Video generation failed'
       };
     }
     
