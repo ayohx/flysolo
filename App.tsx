@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { AppState, BrandProfile, SocialPost, AnalysisStage, PendingAnalysis, AppNotification } from './types';
 import Onboarding from './components/Onboarding';
 import AnalysisLoader from './components/AnalysisLoader';
@@ -10,8 +11,9 @@ import BrandSelector from './components/BrandSelector';
 import NotificationBell from './components/NotificationBell';
 import NotificationToast from './components/NotificationToast';
 import { ToastContainer, useToast } from './components/Toast';
-import { analyzeBrand, generateContentIdeas, generatePostImage, generatePostImageWithSource, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand } from './services/geminiService';
+import { analyzeBrand, generateContentIdeas, generatePostImage, generatePostImageWithSource, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand, clearPendingRequests } from './services/geminiService';
 import { saveBrand, saveBrandAssets, getBrandByUrl, findRelevantAsset, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
+import { cacheGeneratedContent, loadCachedContent, updateCachedPosts, clearCachedContent, clearExpiredCaches, shouldUseCachedContent } from './services/contentCacheService';
 import { Plus, X, Home, ArrowLeft } from 'lucide-react';
 
 // LocalStorage keys - MINIMAL storage only (no large data!)
@@ -41,6 +43,11 @@ const loadFromStorage = <T,>(key: string, fallback: T): T => {
 };
 
 function App() {
+  // React Router hooks for URL-based navigation
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { brandId: urlBrandId } = useParams<{ brandId: string }>();
+  
   const [appState, setAppState] = useState<AppState>(AppState.ONBOARDING);
   const [brandProfile, setBrandProfile] = useState<BrandProfile | null>(null);
   const [generatedPosts, setGeneratedPosts] = useState<SocialPost[]>([]);
@@ -59,8 +66,12 @@ function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   
   // Restore state from Supabase on mount (localStorage only for lightweight data)
+  // NOW WITH CONTENT CACHING to avoid unnecessary API calls on refresh
   useEffect(() => {
     const initializeApp = async () => {
+      // Clean up expired caches on startup
+      await clearExpiredCaches();
+      
       // Get lightweight state from localStorage
       const savedBrandId = loadFromStorage<string | null>(STORAGE_KEYS.CURRENT_BRAND_ID, null);
       const savedState = loadFromStorage<string>(STORAGE_KEYS.APP_STATE, AppState.ONBOARDING);
@@ -74,15 +85,45 @@ function App() {
           const workspace = await loadBrandWorkspace(savedBrandId);
           
           if (workspace) {
-            console.log('✅ Loaded from Supabase:', workspace.brand.name, 'with', workspace.savedPosts.length, 'saved posts');
+            console.log('✅ Loaded from Supabase:', workspace.brand.name, 'with', workspace.posts.length, 'saved posts');
             setBrandProfile(workspace.brand.profile_json);
             setCurrentBrandId(savedBrandId);
-            setLikedPosts(workspace.savedPosts);
+            setLikedPosts(workspace.posts.map(p => ({ ...p.post_json, status: 'liked' as const })));
             
-            // Generate fresh content immediately
-            console.log('🎨 Generating fresh content for session...');
-            const posts = await generateContentIdeas(workspace.brand.profile_json, 10);
-            setGeneratedPosts(posts);
+            // CHECK CONTENT CACHE FIRST - Avoid unnecessary API calls!
+            const cacheStatus = await shouldUseCachedContent(savedBrandId);
+            
+            if (cacheStatus.useCache) {
+              // Load from cache - NO API CALLS!
+              console.log('📦 Using CACHED content (age: ' + cacheStatus.cacheAge + ' mins)');
+              console.log('   Posts: ' + cacheStatus.postCount + ', Images: ' + cacheStatus.imagesLoaded);
+              
+              const cachedPosts = await loadCachedContent(savedBrandId);
+              if (cachedPosts && cachedPosts.length > 0) {
+                setGeneratedPosts(cachedPosts);
+                // Skip image generation for posts that already have images
+                const postsNeedingImages = cachedPosts.filter(p => !p.imageUrl || p.imageUrl.includes('svg+xml'));
+                if (postsNeedingImages.length > 0) {
+                  console.log(`🎨 Only ${postsNeedingImages.length} posts need images (${cachedPosts.length - postsNeedingImages.length} already cached)`);
+                  startImageGeneration(postsNeedingImages.slice(0, 3), workspace.brand.profile_json, savedBrandId);
+                }
+              } else {
+                // Cache was empty, generate fresh
+                console.log('📭 Cache empty, generating fresh content...');
+                const posts = await generateContentIdeas(workspace.brand.profile_json, 10);
+                setGeneratedPosts(posts);
+                // Cache the new content
+                await cacheGeneratedContent(savedBrandId, posts);
+              }
+            } else {
+              // No valid cache - generate fresh content (with rate limiting now!)
+              console.log('🎨 No cache available, generating fresh content...');
+              const posts = await generateContentIdeas(workspace.brand.profile_json, 10);
+              setGeneratedPosts(posts);
+              
+              // Cache the generated content for future refreshes
+              await cacheGeneratedContent(savedBrandId, posts);
+            }
             
             // Set state - images will be generated by the eager-load effect
             if (savedState === AppState.SWIPING || savedState === AppState.DASHBOARD) {
@@ -678,9 +719,16 @@ function App() {
       }
       
       // Update posts with both URL and source tracking
-      setGeneratedPosts(current => 
-        current.map(p => p.id === post.id ? { ...p, imageUrl, imageSource } : p)
-      );
+      setGeneratedPosts(current => {
+        const updated = current.map(p => p.id === post.id ? { ...p, imageUrl, imageSource } : p);
+        
+        // Update cache with new image (fire and forget)
+        if (activeBrandId && imageUrl) {
+          updateCachedPosts(activeBrandId, updated).catch(() => {});
+        }
+        
+        return updated;
+      });
       
       // Also update liked posts if it exists there
       setLikedPosts(current =>
@@ -948,19 +996,32 @@ function App() {
   };
 
   // Brand Selector handlers
+  // NOW WITH CONTENT CACHING and instant navigation
   const handleSelectBrand = async (brand: StoredBrand) => {
-    console.log('📦 Loading brand workspace:', brand.name);
+    console.log('📦 Switching to brand:', brand.name);
+    
+    // CRITICAL: Clear any pending API requests from previous brand
+    // This prevents 429 errors and wasted API calls
+    clearPendingRequests();
+    
+    // NAVIGATE IMMEDIATELY - don't wait for data loading
+    // This is the key UX improvement - instant page transition
+    setAppState(AppState.SWIPING);
+    setIsGeneratingMore(true); // Show loading indicator while we fetch
+    
+    // Update brand ID first (for localStorage sync)
+    setCurrentBrandId(brand.id);
     
     // Load workspace from Supabase (quick operation)
     const workspace = await loadBrandWorkspace(brand.id);
     if (!workspace) {
       console.error('Failed to load brand workspace');
+      setIsGeneratingMore(false);
       return;
     }
     
     // Set brand profile from stored data
     setBrandProfile(workspace.brand.profile_json);
-    setCurrentBrandId(brand.id);
     
     // Load saved posts
     const likedFromDb = workspace.posts.map(p => ({
@@ -969,22 +1030,47 @@ function App() {
     }));
     setLikedPosts(likedFromDb);
     
-    // NAVIGATE IMMEDIATELY - don't wait for AI content generation
-    setAppState(AppState.SWIPING);
-    setIsGeneratingMore(true); // Show loading indicator
+    // CHECK CONTENT CACHE FIRST - avoid API calls if we have cached content
+    const cacheStatus = await shouldUseCachedContent(brand.id);
     
-    // Generate fresh content in background (non-blocking)
-    generateContentIdeas(workspace.brand.profile_json, 10)
-      .then(freshPosts => {
-        setGeneratedPosts(freshPosts);
-        // Start image generation for first 10 posts
-        startImageGeneration(freshPosts.slice(0, 10), workspace.brand.profile_json, brand.id);
+    if (cacheStatus.useCache) {
+      console.log('📦 Using CACHED content for', brand.name);
+      console.log(`   Cache age: ${cacheStatus.cacheAge} mins, Posts: ${cacheStatus.postCount}, Images: ${cacheStatus.imagesLoaded}`);
+      
+      const cachedPosts = await loadCachedContent(brand.id);
+      if (cachedPosts && cachedPosts.length > 0) {
+        setGeneratedPosts(cachedPosts);
         setIsGeneratingMore(false);
-      })
-      .catch(err => {
-        console.error('Failed to generate content:', err);
-        setIsGeneratingMore(false);
-      });
+        
+        // Only generate images for posts that don't have them yet
+        const postsNeedingImages = cachedPosts.filter(p => !p.imageUrl || p.imageUrl.includes('svg+xml'));
+        if (postsNeedingImages.length > 0 && postsNeedingImages.length < cachedPosts.length) {
+          console.log(`🎨 ${cachedPosts.length - postsNeedingImages.length} images already cached, only generating ${postsNeedingImages.length} more`);
+          startImageGeneration(postsNeedingImages.slice(0, 3), workspace.brand.profile_json, brand.id);
+        } else if (postsNeedingImages.length > 0) {
+          startImageGeneration(postsNeedingImages.slice(0, 3), workspace.brand.profile_json, brand.id);
+        }
+        return;
+      }
+    }
+    
+    // No valid cache - generate fresh content (rate-limited now!)
+    console.log('🎨 Generating fresh content for', brand.name, '(no cache)');
+    
+    try {
+      const freshPosts = await generateContentIdeas(workspace.brand.profile_json, 10);
+      setGeneratedPosts(freshPosts);
+      
+      // Cache the generated content for future visits
+      await cacheGeneratedContent(brand.id, freshPosts);
+      
+      // Start image generation (rate-limited, only 3 at a time)
+      startImageGeneration(freshPosts.slice(0, 3), workspace.brand.profile_json, brand.id);
+    } catch (err) {
+      console.error('Failed to generate content:', err);
+    }
+    
+    setIsGeneratingMore(false);
   };
 
   const handleNewBrand = () => {
@@ -1059,8 +1145,11 @@ function App() {
     }
   };
 
-  // Navigate back to brand selector
+  // Navigate back to brand selector - uses React Router for instant navigation
   const handleBackToBrands = () => {
+    // Clear pending API requests to avoid wasted calls
+    clearPendingRequests();
+    navigate('/');
     setAppState(AppState.BRAND_SELECTOR);
   };
 

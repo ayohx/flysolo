@@ -2,6 +2,7 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { BrandProfile, SocialPost } from "../types";
 import { searchPexelsImage, isPexelsConfigured } from "./pexelsService";
 import { getLogoUrlSync, extractDomain } from "./logoService";
+import { queueGeminiRequest, queueImagenRequest, queueVeoRequest, rateLimiter } from "./rateLimiterService";
 
 /**
  * Check if API keys are configured
@@ -784,26 +785,30 @@ export const generateContentIdeas = async (profile: BrandProfile, count: number 
   `;
 
   try {
-    const response = await getTextClient().models.generateContent({
-      model: modelId,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              platform: { type: Type.STRING, enum: ["Instagram", "LinkedIn", "Twitter/X", "TikTok"] },
-              caption: { type: Type.STRING },
-              hashtags: { type: Type.ARRAY, items: { type: Type.STRING } },
-              visualPrompt: { type: Type.STRING },
+    // Use rate-limited queue for Gemini API calls
+    const response = await queueGeminiRequest(async () => {
+      console.log('📝 Generating content ideas via rate-limited queue...');
+      return getTextClient().models.generateContent({
+        model: modelId,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                platform: { type: Type.STRING, enum: ["Instagram", "LinkedIn", "Twitter/X", "TikTok"] },
+                caption: { type: Type.STRING },
+                hashtags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                visualPrompt: { type: Type.STRING },
+              },
+              required: ["platform", "caption", "hashtags", "visualPrompt"],
             },
-            required: ["platform", "caption", "hashtags", "visualPrompt"],
           },
         },
-      },
-    });
+      });
+    }, 3); // Priority 3 (higher priority for content generation)
 
     const rawPosts = JSON.parse(response.text || "[]");
     
@@ -1258,8 +1263,11 @@ TECHNICAL REQUIREMENTS:
 };
 
 /**
- * Enhanced image generation with source tracking
+ * Enhanced image generation with source tracking and RATE LIMITING
  * Returns both the image URL and where it came from
+ * 
+ * CRITICAL: This function now uses the rate limiter to prevent 429 errors.
+ * Imagen requests are queued and executed with proper delays between them.
  */
 export const generatePostImageWithSource = async (
   visualPrompt: string, 
@@ -1304,43 +1312,61 @@ TECHNICAL REQUIREMENTS:
     process.env.VEO_API_KEY,
   ].filter((key, index, arr) => key && key.length > 0 && arr.indexOf(key) === index) as string[];
   
-  // LAYER 1: Try Imagen 4 SDK (latest models)
+  // LAYER 1: Try Imagen 4 via rate-limited queue
+  // This is the CRITICAL change - all Imagen requests go through the queue
   const imagenModels = ["imagen-4.0-generate-001", "imagen-4.0-fast-generate-001"];
   
   for (const apiKey of allApiKeys) {
     for (const model of imagenModels) {
       try {
-        const client = new GoogleGenAI({ apiKey });
-        const response = await client.models.generateImages({
-          model,
-          prompt: finalPrompt,
-          config: { numberOfImages: 1, aspectRatio: aspectRatio === "9:16" ? "9:16" : "1:1" },
-        });
+        // Queue the Imagen request with rate limiting
+        const imageData = await queueImagenRequest(async () => {
+          console.log(`🖼️ Image generation queued: ${model}`);
+          const client = new GoogleGenAI({ apiKey });
+          const response = await client.models.generateImages({
+            model,
+            prompt: finalPrompt,
+            config: { numberOfImages: 1, aspectRatio: aspectRatio === "9:16" ? "9:16" : "1:1" },
+          });
+          return response.generatedImages?.[0]?.image?.imageBytes;
+        }, 5); // Priority 5 (medium)
         
-        const imageData = response.generatedImages?.[0]?.image?.imageBytes;
         if (imageData) {
           console.log(`✅ Imagen 4 SUCCESS with model: ${model}`);
           return { imageUrl: `data:image/png;base64,${imageData}`, source: 'imagen3' };
         }
-      } catch {}
+      } catch (err: any) {
+        // Log but continue to next model/key
+        console.warn(`⚠️ Imagen ${model} failed:`, err?.message?.substring(0, 100));
+      }
     }
   }
   
-  // LAYER 2: Try Imagen REST API
+  // LAYER 2: Try Imagen REST API (also rate-limited)
   for (const apiKey of allApiKeys) {
-    const restImage = await generateImageWithRestApi(finalPrompt, apiKey, aspectRatio);
-    if (restImage) {
-      return { imageUrl: restImage, source: 'imagen3' };
+    try {
+      const restImage = await queueImagenRequest(async () => {
+        return generateImageWithRestApi(finalPrompt, apiKey, aspectRatio);
+      }, 6);
+      
+      if (restImage) {
+        return { imageUrl: restImage, source: 'imagen3' };
+      }
+    } catch {}
+  }
+  
+  // LAYER 3: Try Gemini (different rate limit)
+  try {
+    const geminiImage = await queueGeminiRequest(async () => {
+      return generateImageWithGemini(finalPrompt, aspectRatio);
+    }, 7);
+    
+    if (geminiImage) {
+      return { imageUrl: geminiImage, source: 'gemini-flash' };
     }
-  }
+  } catch {}
   
-  // LAYER 3: Try Gemini
-  const geminiImage = await generateImageWithGemini(finalPrompt, aspectRatio);
-  if (geminiImage) {
-    return { imageUrl: geminiImage, source: 'gemini-flash' };
-  }
-  
-  // LAYER 4: Pexels
+  // LAYER 4: Pexels (no rate limiting needed - different API)
   if (isPexelsConfigured()) {
     const pexelsOrientation = aspectRatio === "9:16" ? 'portrait' : 'square';
     const pexelsImage = await searchPexelsImage(safeProfile, visualPrompt, pexelsOrientation);
@@ -1349,12 +1375,26 @@ TECHNICAL REQUIREMENTS:
     }
   }
   
-  // LAYER 5: Placeholder
+  // LAYER 5: Placeholder (no API call)
   return { 
     imageUrl: getBrandedPlaceholderImage(safeProfile, visualPrompt), 
     source: 'placeholder',
     error: 'All AI image generation methods failed. Using branded placeholder.',
   };
+};
+
+/**
+ * Get current API rate limiter status (for debugging/UI)
+ */
+export const getApiStatus = () => {
+  return rateLimiter.getStatus();
+};
+
+/**
+ * Clear all pending API requests (e.g., when switching brands)
+ */
+export const clearPendingRequests = () => {
+  rateLimiter.clearQueues();
 };
 
 /**
