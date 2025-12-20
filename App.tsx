@@ -48,6 +48,10 @@ function App() {
   const [loadingImages, setLoadingImages] = useState<Set<string>>(new Set());
   const [isHydrated, setIsHydrated] = useState(false);
   
+  // Brand management state - MUST be before init useEffect that uses them
+  const [currentBrandId, setCurrentBrandId] = useState<string | null>(null);
+  const [allBrands, setAllBrands] = useState<StoredBrand[]>([]);
+  
   // Check if API is configured
   const apiConfigured = isApiConfigured();
   
@@ -163,8 +167,7 @@ function App() {
   const [isGeneratingMore, setIsGeneratingMore] = useState(false);
   const [customCreateMode, setCustomCreateMode] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
-  const [currentBrandId, setCurrentBrandId] = useState<string | null>(null); // Supabase brand ID
-  const [allBrands, setAllBrands] = useState<StoredBrand[]>([]); // All saved brands for switcher
+  // currentBrandId and allBrands moved to top of component (before init useEffect)
   const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Toast notifications
