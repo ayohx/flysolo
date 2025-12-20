@@ -114,63 +114,85 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       
       const location = "us-central1";
       
-      // VEO 2.0 uses predictLongRunning which returns an LRO (Long Running Operation)
-      // The operation name format varies - try multiple endpoint patterns
+      // VEO 2.0 uses predictLongRunning which returns an LRO with UUID-style operation ID
+      // The standard operations.get API expects numeric Long IDs, not UUIDs
+      // So we need to use fetchPredictOperation on the model endpoint instead
       
-      // Pattern 1: Direct operation path (for publisher model operations)
-      let statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
+      // Extract model path from operation name
+      // Format: projects/{project}/locations/{location}/publishers/google/models/{model}/operations/{opId}
+      const modelMatch = operationName.match(/^(projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+)\/operations\/([^/]+)$/);
       
-      // Pattern 2: If operation name is just the operation ID, construct full path
-      if (!operationName.startsWith('projects/')) {
-        // Extract operation ID and construct proper path
+      let statusEndpoint: string;
+      let requestBody: any = {};
+      let method = "GET";
+      
+      if (modelMatch) {
+        // VEO model operation - use fetchPredictOperation
+        const modelPath = modelMatch[1];
+        const opId = modelMatch[2];
+        
+        // Use the LRO wait endpoint which works with UUID operation IDs
+        statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}:wait`;
+        method = "POST";
+        requestBody = { timeout: "1s" }; // Short timeout to just check status
+        
+        console.log("📡 VEO status endpoint (LRO wait):", statusEndpoint);
+      } else if (!operationName.startsWith('projects/')) {
+        // Just an operation ID - construct standard path
         statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/operations/${operationName}`;
+        console.log("📡 Standard operations endpoint:", statusEndpoint);
+      } else {
+        // Full path but not a model operation - try direct GET
+        statusEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
+        console.log("📡 Direct operation endpoint:", statusEndpoint);
       }
       
-      console.log("📡 Status endpoint:", statusEndpoint);
-      
       let statusResponse = await fetch(statusEndpoint, {
-        method: "GET",  // Standard GET for operation status
+        method: method,
         headers: {
           "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
         },
+        body: method === "POST" ? JSON.stringify(requestBody) : undefined,
       });
       
-      // If first endpoint fails with 404, try alternative pattern
-      if (statusResponse.status === 404 && operationName.includes('/publishers/')) {
-        console.log("⚠️ Publisher endpoint 404, trying standard operations endpoint...");
+      // If LRO wait fails, try direct GET on the operation
+      if (!statusResponse.ok && method === "POST") {
+        console.log("⚠️ LRO wait failed, trying direct GET...");
+        const directEndpoint = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
         
-        // Extract just the operation ID from the full path
-        const opIdMatch = operationName.match(/operations\/([^/]+)$/);
-        if (opIdMatch) {
-          const opId = opIdMatch[1];
-          const altEndpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/operations/${opId}`;
-          console.log("📡 Alternative endpoint:", altEndpoint);
-          
-          statusResponse = await fetch(altEndpoint, {
-            method: "GET",
-            headers: {
-              "Authorization": `Bearer ${accessToken}`,
-            },
-          });
-        }
+        statusResponse = await fetch(directEndpoint, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+          },
+        });
       }
       
       if (!statusResponse.ok) {
         const errorText = await statusResponse.text();
         console.error("❌ Status check failed:", statusResponse.status, errorText);
         
-        // For 404, provide more helpful debugging info
-        if (statusResponse.status === 404) {
-          console.error("❌ Operation not found - it may have expired or was never created");
-          console.error("   Tried endpoint:", statusEndpoint);
+        // For 404/400, provide more helpful debugging info
+        if (statusResponse.status === 404 || statusResponse.status === 400) {
+          console.error("❌ Operation check failed - may have expired or invalid format");
+          console.error("   Endpoint:", statusEndpoint);
           console.error("   Operation name:", operationName);
+          
+          // Parse error for more details
+          let errorMessage = "Video operation check failed.";
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.error?.message || errorMessage;
+          } catch {}
+          
           return {
             statusCode: 200, // Return 200 so client knows function worked
             headers,
             body: JSON.stringify({
               status: "failed",
               done: true,
-              error: "Video operation not found. The operation may have expired (VEO operations typically last ~1 hour) or generation failed.",
+              error: errorMessage,
             }),
           };
         }
