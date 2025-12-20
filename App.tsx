@@ -1133,6 +1133,11 @@ function App() {
     setIsRefreshing(true);
     
     try {
+      // IMPORTANT: Clear content cache so fresh content will be generated
+      // This prevents stale/broken images from being reused
+      await clearCachedContent(brand.id);
+      console.log('🧹 Content cache cleared for:', brand.name);
+      
       const result = await softRefreshBrand(
         brand.profile_json, 
         brand.url.startsWith('http') ? brand.url : `https://${brand.url}`
@@ -1149,12 +1154,12 @@ function App() {
         // Show what changed with beautiful toast
         toast.success(
           'Refresh Complete!',
-          result.changes.join(' • ')
+          result.changes.join(' • ') + ' • Content cache cleared'
         );
       } else {
         toast.info(
-          'All Up to Date',
-          'No new information found. Your brand profile is current.'
+          'Content Refreshed',
+          'Brand profile unchanged, but content cache cleared for fresh generation.'
         );
       }
     } catch (error) {
