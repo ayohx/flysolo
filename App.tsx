@@ -14,7 +14,7 @@ import { ToastContainer, useToast } from './components/Toast';
 import { analyzeBrand, generateContentIdeas, generatePostImage, generatePostImageWithSource, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand, clearPendingRequests } from './services/geminiService';
 import { saveBrand, getBrandByUrl, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts } from './services/supabaseService';
 // NOTE: saveBrandAssets and findRelevantAsset removed - AI was hallucinating fake image URLs
-import { cacheGeneratedContent, loadCachedContent, updateCachedPosts, clearCachedContent, clearExpiredCaches, shouldUseCachedContent, deletePostFromCache } from './services/contentCacheService';
+import { cacheGeneratedContent, loadCachedContent, updateCachedPosts, clearCachedContent, clearExpiredCaches, shouldUseCachedContent, deletePostFromCache, purgeAllCachesForBrand } from './services/contentCacheService';
 import { Plus, X, Home, ArrowLeft } from 'lucide-react';
 
 // LocalStorage keys - MINIMAL storage only (no large data!)
@@ -272,11 +272,19 @@ function App() {
   // They are regenerated fresh each session for better performance
   // Only likedPosts are saved to Supabase (see handleLike function)
   
-  // Clear all saved data and start fresh
-  const handleStartFresh = () => {
+  // Clear all saved data and start fresh - NUCLEAR OPTION
+  const handleStartFresh = async () => {
+    console.log('🔥 FRESH START - Purging all caches');
+    
+    // If we have a current brand, purge ALL its caches from everywhere
+    if (currentBrandId) {
+      await purgeAllCachesForBrand(currentBrandId);
+    }
+    
     // Clear lightweight localStorage keys
     localStorage.removeItem(STORAGE_KEYS.CURRENT_BRAND_ID);
     localStorage.removeItem(STORAGE_KEYS.APP_STATE);
+    
     // Clear React state
     setBrandProfile(null);
     setCurrentBrandId(null);
@@ -931,18 +939,29 @@ function App() {
   };
 
   const handleReject = async (post: SocialPost) => {
+    console.log(`🗑️ REJECTING post ${post.id} - removing from all storage`);
+    
     // Remove from generated posts immediately (optimistic update)
     setGeneratedPosts(prev => prev.filter(p => p.id !== post.id));
     
-    // Delete from cache with proper error handling (not fire-and-forget!)
+    // AGGRESSIVELY delete from cache - if it fails, NUKE the entire cache
+    // This ensures rejected posts NEVER reappear
     if (currentBrandId) {
       const deleted = await deletePostFromCache(currentBrandId, post.id);
       if (!deleted) {
-        console.error(`❌ Failed to delete post ${post.id} from cache - may reappear on refresh`);
-        // Optionally show toast to user
-        toast.error('Cache sync failed', 'This post may reappear after refresh. Try swiping again.');
+        // The deletePostFromCache already tries to nuke on failure,
+        // but if even that failed, clear the posts from state forcefully
+        console.error(`❌ Cache deletion completely failed - forcing state clear`);
+        toast.warning('Cache sync failed', 'Content will be regenerated on next visit.');
       }
     }
+    
+    // Also remove from any pending generation attempts
+    setGenerationAttempts(prev => {
+      const next = new Map(prev);
+      next.delete(post.id);
+      return next;
+    });
   };
 
   const handleFetchMore = async () => {
@@ -1273,8 +1292,12 @@ function App() {
   };
 
   const handleHardRefresh = async (brand: StoredBrand) => {
-    console.log('🔄 Hard refresh for:', brand.name);
-    // Clear posts but keep the brand context
+    console.log('🔄 HARD REFRESH for:', brand.name, '- PURGING ALL CACHES');
+    
+    // NUKE all caches - Supabase, localStorage, sessionStorage
+    await purgeAllCachesForBrand(brand.id);
+    
+    // Clear React state
     setGeneratedPosts([]);
     setGenerationAttempts(new Map()); // Reset generation tracking
     // Keep liked posts - they're the user's work
@@ -1288,14 +1311,13 @@ function App() {
   };
 
   const handleSoftRefresh = async (brand: StoredBrand) => {
-    console.log('🔄 Soft refresh for:', brand.name);
+    console.log('🔄 SOFT REFRESH for:', brand.name, '- PURGING ALL CACHES');
     setIsRefreshing(true);
     
     try {
-      // IMPORTANT: Clear content cache so fresh content will be generated
-      // This prevents stale/broken images from being reused
-      await clearCachedContent(brand.id);
-      console.log('🧹 Content cache cleared for:', brand.name);
+      // NUKE all caches - Supabase, localStorage, sessionStorage
+      await purgeAllCachesForBrand(brand.id);
+      console.log('🧹 All caches purged for:', brand.name);
       
       const result = await softRefreshBrand(
         brand.profile_json, 

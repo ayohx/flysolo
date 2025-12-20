@@ -228,96 +228,154 @@ export const updateCachedPosts = async (
 };
 
 /**
- * Delete a specific post from the cache by ID
- * Used when user swipes left (rejects) a post
+ * AGGRESSIVELY delete a post from cache
  * 
- * CRITICAL: This must work reliably to prevent rejected posts from reappearing
+ * If the graceful update fails (timeout), we NUKE the entire cache.
+ * Better to regenerate fresh content than show stale rejected posts.
  * 
  * @param brandId - The brand's UUID
  * @param postId - The post ID to remove
- * @param maxRetries - Maximum retry attempts (default 3)
- * @returns true if deletion succeeded, false otherwise
+ * @returns true if deletion succeeded (or cache was nuked), false only if everything failed
  */
 export const deletePostFromCache = async (
   brandId: string,
-  postId: string,
-  maxRetries: number = 3
+  postId: string
 ): Promise<boolean> => {
   const client = getSupabase();
   
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      // Step 1: Load current cache
-      const { data, error: loadError } = await client
-        .from('brand_content_cache')
-        .select('posts_json, images_loaded')
-        .eq('brand_id', brandId)
-        .single();
-      
-      if (loadError) {
-        // No cache exists - that's fine, nothing to delete
-        if (loadError.code === 'PGRST116' || loadError.code === '42P01') {
-          console.log('📭 No cache exists, nothing to delete');
-          return true;
-        }
-        console.error(`❌ Cache load failed (attempt ${attempt}/${maxRetries}):`, loadError.message);
-        if (attempt < maxRetries) {
-          await sleep(1000 * attempt); // Exponential backoff
-          continue;
-        }
-        return false;
-      }
-      
-      if (!data || !data.posts_json) {
-        console.log('📭 Cache empty, nothing to delete');
+  try {
+    // Step 1: Load current cache
+    const { data, error: loadError } = await client
+      .from('brand_content_cache')
+      .select('posts_json')
+      .eq('brand_id', brandId)
+      .single();
+    
+    if (loadError) {
+      // No cache exists - that's fine, nothing to delete
+      if (loadError.code === 'PGRST116' || loadError.code === '42P01') {
+        console.log('📭 No cache exists, nothing to delete');
         return true;
       }
-      
-      // Step 2: Filter out the deleted post
-      const currentPosts = data.posts_json as SocialPost[];
-      const updatedPosts = currentPosts.filter(p => p.id !== postId);
-      
-      // Check if post was actually in the cache
-      if (updatedPosts.length === currentPosts.length) {
-        console.log(`⚠️ Post ${postId} not found in cache (already deleted?)`);
-        return true;
-      }
-      
-      // Step 3: Update with filtered posts
-      const imagesLoaded = updatedPosts.filter(p => p.imageUrl && !p.imageUrl.includes('svg+xml')).length;
-      
-      const { error: updateError } = await client
-        .from('brand_content_cache')
-        .update({ 
-          posts_json: updatedPosts,
-          post_count: updatedPosts.length,
-          images_loaded: imagesLoaded,
-        })
-        .eq('brand_id', brandId);
-      
-      if (updateError) {
-        console.error(`❌ Cache update failed (attempt ${attempt}/${maxRetries}):`, updateError.code, updateError.message);
-        if (attempt < maxRetries) {
-          await sleep(1000 * attempt); // Exponential backoff
-          continue;
-        }
-        return false;
-      }
-      
-      console.log(`🗑️ Post ${postId.slice(0, 8)}... deleted from cache (${updatedPosts.length} posts remaining)`);
+      // Any other error - nuke the cache to be safe
+      console.warn(`⚠️ Cache load failed, nuking entire cache: ${loadError.message}`);
+      return await nukeCacheForBrand(brandId);
+    }
+    
+    if (!data || !data.posts_json) {
+      console.log('📭 Cache empty, nothing to delete');
       return true;
-      
-    } catch (e) {
-      console.error(`❌ Cache deletion error (attempt ${attempt}/${maxRetries}):`, e);
-      if (attempt < maxRetries) {
-        await sleep(1000 * attempt);
-        continue;
-      }
+    }
+    
+    // Step 2: Filter out the deleted post
+    const currentPosts = data.posts_json as SocialPost[];
+    const updatedPosts = currentPosts.filter(p => p.id !== postId);
+    
+    // Check if post was actually in the cache
+    if (updatedPosts.length === currentPosts.length) {
+      console.log(`⚠️ Post ${postId} not found in cache`);
+      return true;
+    }
+    
+    // Step 3: Try to update - with a SHORT timeout expectation
+    const imagesLoaded = updatedPosts.filter(p => p.imageUrl && !p.imageUrl.includes('svg+xml')).length;
+    
+    const { error: updateError } = await client
+      .from('brand_content_cache')
+      .update({ 
+        posts_json: updatedPosts,
+        post_count: updatedPosts.length,
+        images_loaded: imagesLoaded,
+      })
+      .eq('brand_id', brandId);
+    
+    if (updateError) {
+      // UPDATE FAILED (likely timeout) - NUKE THE ENTIRE CACHE
+      console.error(`❌ Cache update failed (${updateError.code}), NUKING entire cache to prevent stale data`);
+      return await nukeCacheForBrand(brandId);
+    }
+    
+    console.log(`🗑️ Post ${postId.slice(0, 8)}... deleted from cache (${updatedPosts.length} remaining)`);
+    return true;
+    
+  } catch (e) {
+    // Any exception - NUKE IT
+    console.error('❌ Cache deletion error, NUKING cache:', e);
+    return await nukeCacheForBrand(brandId);
+  }
+};
+
+/**
+ * Nuclear option: DELETE the entire cache row for a brand
+ * Called when graceful updates fail - better to regenerate than show stale content
+ */
+export const nukeCacheForBrand = async (brandId: string): Promise<boolean> => {
+  const client = getSupabase();
+  
+  try {
+    const { error } = await client
+      .from('brand_content_cache')
+      .delete()
+      .eq('brand_id', brandId);
+    
+    if (error && !error.message?.includes('does not exist')) {
+      console.error('❌ Failed to nuke cache:', error);
       return false;
     }
+    
+    console.log('💥 NUKED content cache for brand - will regenerate fresh content');
+    return true;
+  } catch (e) {
+    console.error('❌ Cache nuke error:', e);
+    return false;
+  }
+};
+
+/**
+ * PURGE EVERYTHING - Nuclear option for when things are really broken
+ * Clears: Supabase cache + localStorage + sessionStorage
+ */
+export const purgeAllCachesForBrand = async (brandId: string): Promise<void> => {
+  console.log('🔥 PURGING ALL CACHES for brand', brandId);
+  
+  // 1. Nuke Supabase cache
+  await nukeCacheForBrand(brandId);
+  
+  // 2. Clear any localStorage items related to this brand
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.includes(brandId) || key.includes('posts') || key.includes('cache'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+    if (keysToRemove.length > 0) {
+      console.log(`🧹 Cleared ${keysToRemove.length} localStorage items`);
+    }
+  } catch (e) {
+    // localStorage might not be available
   }
   
-  return false;
+  // 3. Clear any sessionStorage items
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key && (key.includes(brandId) || key.includes('posts') || key.includes('cache'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => sessionStorage.removeItem(key));
+    if (keysToRemove.length > 0) {
+      console.log(`🧹 Cleared ${keysToRemove.length} sessionStorage items`);
+    }
+  } catch (e) {
+    // sessionStorage might not be available
+  }
+  
+  console.log('✅ All caches purged for brand');
 };
 
 /**
