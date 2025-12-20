@@ -169,13 +169,23 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("❌ Vertex AI error:", response.status, errorText);
+      console.error("❌ Vertex AI error:", response.status);
+      console.error("   Full error response:", errorText);
+      console.error("   Endpoint:", endpoint);
+      console.error("   Project:", projectId);
       
       // Parse error for better debugging
       let errorDetails = errorText;
+      let errorCode = "";
+      let errorReason = "";
       try {
         const errorJson = JSON.parse(errorText);
         errorDetails = errorJson.error?.message || errorText;
+        errorCode = errorJson.error?.code || "";
+        errorReason = errorJson.error?.status || "";
+        console.error("   Error code:", errorCode);
+        console.error("   Error reason:", errorReason);
+        console.error("   Error message:", errorDetails);
       } catch {}
       
       return {
@@ -184,6 +194,10 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
         body: JSON.stringify({
           error: `Vertex AI error: ${response.status}`,
           details: errorDetails,
+          code: errorCode,
+          reason: errorReason,
+          endpoint: endpoint,
+          project: projectId,
         }),
       };
     }
