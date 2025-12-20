@@ -13,7 +13,9 @@ root.render(
   <React.StrictMode>
     <BrowserRouter>
       <Routes>
-        {/* All routes handled by App component */}
+        {/* Brand-specific route - /brand/nike, /brand/orekun-media, etc */}
+        <Route path="/brand/:brandSlug" element={<App />} />
+        {/* All other routes - home, onboarding, etc */}
         <Route path="/*" element={<App />} />
       </Routes>
     </BrowserRouter>

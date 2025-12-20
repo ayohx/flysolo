@@ -31,6 +31,14 @@ const normaliseUrl = (url: string): string => {
   return url.toLowerCase().replace(/\/$/, '').replace(/^https?:\/\//, '');
 };
 
+// Helper to create URL slugs from brand names
+const createBrandSlug = (name: string): string => {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')  // Replace non-alphanumeric with hyphens
+    .replace(/^-+|-+$/g, '');      // Trim leading/trailing hyphens
+};
+
 // Helper to load from localStorage (only works client-side)
 const loadFromStorage = <T,>(key: string, fallback: T): T => {
   if (typeof window === 'undefined') return fallback;
@@ -46,7 +54,7 @@ function App() {
   // React Router hooks for URL-based navigation
   const navigate = useNavigate();
   const location = useLocation();
-  const { brandId: urlBrandId } = useParams<{ brandId: string }>();
+  const { brandSlug } = useParams<{ brandSlug: string }>();
   
   const [appState, setAppState] = useState<AppState>(AppState.ONBOARDING);
   const [brandProfile, setBrandProfile] = useState<BrandProfile | null>(null);
@@ -164,6 +172,75 @@ function App() {
     
     initializeApp();
   }, []);
+  
+  // Handle URL-based brand navigation
+  // When user navigates to /brand/nike, load the Nike brand
+  useEffect(() => {
+    if (!isHydrated || !brandSlug || allBrands.length === 0) return;
+    
+    // Find brand by matching slug
+    const matchingBrand = allBrands.find(b => createBrandSlug(b.name) === brandSlug);
+    
+    if (matchingBrand) {
+      // Only switch if it's a different brand
+      if (matchingBrand.id !== currentBrandId) {
+        console.log('🔗 URL navigation to brand:', matchingBrand.name);
+        
+        // Load this brand's workspace
+        (async () => {
+          // Clear previous brand state
+          setGeneratedPosts([]);
+          setLikedPosts([]);
+          setIsGeneratingMore(true);
+          setAppState(AppState.SWIPING);
+          setCurrentBrandId(matchingBrand.id);
+          
+          const workspace = await loadBrandWorkspace(matchingBrand.id);
+          if (!workspace) {
+            console.error('Failed to load brand workspace from URL');
+            setIsGeneratingMore(false);
+            return;
+          }
+          
+          setBrandProfile(workspace.brand.profile_json);
+          setLikedPosts(workspace.posts.map(p => ({ ...p.post_json, status: 'liked' as const })));
+          
+          // Check content cache
+          const cacheStatus = await shouldUseCachedContent(matchingBrand.id);
+          
+          if (cacheStatus.useCache) {
+            console.log('📦 Loading CACHED content for', matchingBrand.name);
+            const cachedPosts = await loadCachedContent(matchingBrand.id);
+            if (cachedPosts && cachedPosts.length > 0) {
+              setGeneratedPosts(cachedPosts);
+              setIsGeneratingMore(false);
+              
+              // Generate images for posts that need them
+              const postsNeedingImages = cachedPosts.filter(p => !p.imageUrl || p.imageUrl.includes('svg+xml'));
+              if (postsNeedingImages.length > 0) {
+                startImageGeneration(postsNeedingImages.slice(0, 3), workspace.brand.profile_json, matchingBrand.id);
+              }
+              return;
+            }
+          }
+          
+          // No cache - generate fresh content
+          console.log('🎨 Generating fresh content for', matchingBrand.name);
+          const posts = await generateContentIdeas(workspace.brand.profile_json, 10);
+          setGeneratedPosts(posts);
+          await cacheGeneratedContent(matchingBrand.id, posts);
+          setIsGeneratingMore(false);
+          
+          // Start image generation
+          startImageGeneration(posts.slice(0, 3), workspace.brand.profile_json, matchingBrand.id);
+        })();
+      }
+    } else if (brandSlug) {
+      // Brand not found - redirect to brand selector
+      console.warn('⚠️ Brand not found for slug:', brandSlug);
+      navigate('/');
+    }
+  }, [brandSlug, isHydrated, allBrands.length]);
   
   // Save ONLY lightweight data to localStorage (IDs and state strings)
   // All heavy data (posts, images) goes to Supabase
@@ -1027,7 +1104,7 @@ function App() {
   };
 
   // Brand Selector handlers
-  // NOW WITH CONTENT CACHING and instant navigation
+  // NOW WITH CONTENT CACHING and instant navigation via URL
   const handleSelectBrand = async (brand: StoredBrand) => {
     console.log('📦 Switching to brand:', brand.name);
     
@@ -1035,8 +1112,17 @@ function App() {
     // This prevents 429 errors and wasted API calls
     clearPendingRequests();
     
-    // NAVIGATE IMMEDIATELY - don't wait for data loading
-    // This is the key UX improvement - instant page transition
+    // CLEAR PREVIOUS BRAND STATE IMMEDIATELY - prevents showing stale content
+    setGeneratedPosts([]);
+    setLikedPosts([]);
+    setBrandProfile(null);
+    
+    // NAVIGATE IMMEDIATELY to brand-specific URL
+    // This provides instant visual feedback and clean page transition
+    const brandSlug = createBrandSlug(brand.name);
+    navigate(`/brand/${brandSlug}`);
+    
+    // Set app state for the brand workspace
     setAppState(AppState.SWIPING);
     setIsGeneratingMore(true); // Show loading indicator while we fetch
     
@@ -1185,6 +1271,13 @@ function App() {
   const handleBackToBrands = () => {
     // Clear pending API requests to avoid wasted calls
     clearPendingRequests();
+    
+    // Clear brand state to prevent stale content showing
+    setGeneratedPosts([]);
+    setLikedPosts([]);
+    setBrandProfile(null);
+    setCurrentBrandId(null);
+    
     navigate('/');
     setAppState(AppState.BRAND_SELECTOR);
   };
