@@ -381,6 +381,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
           sampleCount: 1,
           durationSeconds: durationSeconds,
           personGeneration: "dont_allow",
+          generateAudio: false, // Required for VEO 3 models
         },
       };
     } else {
@@ -397,6 +398,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
           sampleCount: 1,
           durationSeconds: durationSeconds,
           personGeneration: "dont_allow",
+          generateAudio: false, // Required for VEO 3 models
         },
       };
     }
