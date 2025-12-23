@@ -462,24 +462,54 @@ export const getSavedPosts = async (brandId: string): Promise<SavedPost[]> => {
 
 /**
  * Update post schedule
+ * CRITICAL: postId is the React post ID (post_json.id), NOT the database row ID
+ * We must first find the row by matching post_json.id
  */
-export const updatePostSchedule = async (postId: string, scheduledDate: string): Promise<boolean> => {
+export const updatePostSchedule = async (brandId: string, postId: string, scheduledDate: string): Promise<boolean> => {
   const client = getSupabase();
   
   try {
+    // First, find the saved post by its post_json.id (not the database row id)
+    const { data: posts, error: findError } = await client
+      .from('saved_posts')
+      .select('id, post_json')
+      .eq('brand_id', brandId);
+    
+    if (findError) {
+      console.error('Failed to find saved post for scheduling:', findError);
+      return false;
+    }
+    
+    // Find the post with matching post_json.id
+    const postToUpdate = posts?.find(p => (p.post_json as any)?.id === postId);
+    
+    if (!postToUpdate) {
+      console.error('Post not found in saved_posts for scheduling:', postId);
+      return false;
+    }
+    
+    // Also update the scheduledDate inside post_json for consistency
+    const updatedPostJson = {
+      ...(postToUpdate.post_json as any),
+      scheduledDate: scheduledDate,
+    };
+    
+    // Update the schedule using the database row ID
     const { error } = await client
       .from('saved_posts')
       .update({ 
         scheduled_date: scheduledDate, 
-        status: 'scheduled' 
+        status: 'scheduled',
+        post_json: updatedPostJson,
       })
-      .eq('id', postId);
+      .eq('id', postToUpdate.id);
     
     if (error) {
       console.error('Failed to update schedule:', error);
       return false;
     }
     
+    console.log(`✅ Post ${postId} scheduled for ${scheduledDate} (DB row: ${postToUpdate.id})`);
     return true;
   } catch (e) {
     console.error('Schedule update error:', e);

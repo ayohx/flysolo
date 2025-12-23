@@ -12,7 +12,7 @@ import NotificationBell from './components/NotificationBell';
 import NotificationToast from './components/NotificationToast';
 import { ToastContainer, useToast } from './components/Toast';
 import { analyzeBrand, generateContentIdeas, generatePostImage, generatePostImageWithSource, refinePost, mergeSourceUrl, generatePostVideo, checkVideoStatus, isApiConfigured, getMissingApiKeys, softRefreshBrand, clearPendingRequests } from './services/geminiService';
-import { saveBrand, getBrandByUrl, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts, savePost, deleteSavedPost } from './services/supabaseService';
+import { saveBrand, getBrandByUrl, checkDatabaseSetup, listBrands, loadBrandWorkspace, StoredBrand, getSavedPosts, savePost, deleteSavedPost, updatePostSchedule } from './services/supabaseService';
 // NOTE: saveBrandAssets and findRelevantAsset removed - AI was hallucinating fake image URLs
 import { cacheGeneratedContent, loadCachedContent, updateCachedPosts, clearCachedContent, clearExpiredCaches, shouldUseCachedContent, deletePostFromCache, purgeAllCachesForBrand } from './services/contentCacheService';
 import { Plus, X, Home, ArrowLeft } from 'lucide-react';
@@ -101,7 +101,12 @@ function App() {
             console.log('✅ Loaded from Supabase:', workspace.brand.name, 'with', workspace.posts.length, 'saved posts');
             setBrandProfile(workspace.brand.profile_json);
             setCurrentBrandId(savedBrandId);
-            setLikedPosts(workspace.posts.map(p => ({ ...p.post_json, status: 'liked' as const })));
+            // Merge scheduled_date from DB column into post (source of truth for scheduling)
+            setLikedPosts(workspace.posts.map(p => ({ 
+              ...p.post_json, 
+              scheduledDate: p.scheduled_date || p.post_json.scheduledDate,
+              status: 'liked' as const 
+            })));
             
             // CHECK CONTENT CACHE FIRST - Avoid unnecessary API calls!
             const cacheStatus = await shouldUseCachedContent(savedBrandId);
@@ -209,7 +214,12 @@ function App() {
           }
           
           setBrandProfile(workspace.brand.profile_json);
-          setLikedPosts(workspace.posts.map(p => ({ ...p.post_json, status: 'liked' as const })));
+          // Merge scheduled_date from DB column into post (source of truth for scheduling)
+          setLikedPosts(workspace.posts.map(p => ({ 
+            ...p.post_json, 
+            scheduledDate: p.scheduled_date || p.post_json.scheduledDate,
+            status: 'liked' as const 
+          })));
           
           // Check content cache
           const cacheStatus = await shouldUseCachedContent(matchingBrand.id);
@@ -1079,19 +1089,53 @@ function App() {
   };
 
   // Schedule a post to calendar
-  const handleSchedulePost = (postId: string, scheduledDate: string) => {
+  const handleSchedulePost = async (postId: string, scheduledDate: string) => {
+    // 1. Update React state immediately for responsive UI
     setLikedPosts(prev => prev.map(p => 
       p.id === postId ? { ...p, scheduledDate } : p
     ));
-    console.log(`Post ${postId} scheduled for ${scheduledDate}`);
+    console.log(`📅 Post ${postId} scheduled for ${scheduledDate}`);
+    
+    // 2. Persist to database
+    if (currentBrandId) {
+      const success = await updatePostSchedule(currentBrandId, postId, scheduledDate);
+      if (success) {
+        toast.success('Scheduled!', `Post scheduled for ${new Date(scheduledDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`);
+      } else {
+        toast.error('Schedule failed', 'Could not save to database. Please try again.');
+        // Revert the optimistic update
+        setLikedPosts(prev => prev.map(p => 
+          p.id === postId ? { ...p, scheduledDate: undefined } : p
+        ));
+      }
+    } else {
+      toast.info('Scheduled locally', 'No brand linked - schedule saved locally only');
+    }
   };
 
   // Reschedule a post (drag-drop from calendar)
-  const handleReschedulePost = (postId: string, newDate: string) => {
+  const handleReschedulePost = async (postId: string, newDate: string) => {
+    // Get original date for potential revert
+    const originalPost = likedPosts.find(p => p.id === postId);
+    const originalDate = originalPost?.scheduledDate;
+    
+    // 1. Update React state immediately for responsive drag-drop UI
     setLikedPosts(prev => prev.map(p => 
       p.id === postId ? { ...p, scheduledDate: newDate } : p
     ));
-    console.log(`Post ${postId} rescheduled to ${newDate}`);
+    console.log(`📅 Post ${postId} rescheduled to ${newDate}`);
+    
+    // 2. Persist to database
+    if (currentBrandId) {
+      const success = await updatePostSchedule(currentBrandId, postId, newDate);
+      if (!success) {
+        toast.error('Reschedule failed', 'Could not save to database.');
+        // Revert the optimistic update
+        setLikedPosts(prev => prev.map(p => 
+          p.id === postId ? { ...p, scheduledDate: originalDate } : p
+        ));
+      }
+    }
   };
 
   // Handle animation request - generates video from image
@@ -1265,9 +1309,10 @@ function App() {
     // Set brand profile from stored data
     setBrandProfile(workspace.brand.profile_json);
     
-    // Load saved posts
+    // Load saved posts with scheduled_date from DB column (source of truth for scheduling)
     const likedFromDb = workspace.posts.map(p => ({
       ...p.post_json,
+      scheduledDate: p.scheduled_date || p.post_json.scheduledDate,
       status: 'liked' as const,
     }));
     setLikedPosts(likedFromDb);
