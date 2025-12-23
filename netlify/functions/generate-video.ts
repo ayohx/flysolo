@@ -243,9 +243,20 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       console.log("📊 Operation status:", JSON.stringify(statusResult, null, 2));
       
       if (statusResult.done) {
-        // Check for video in response
-        const videoUri = statusResult.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
-          || statusResult.response?.generatedVideos?.[0]?.video?.uri;
+        // Check for video in response - VEO 3.0 uses various response structures
+        const response = statusResult.response || statusResult;
+        const videoUri = 
+          // VEO 3.0 standard path
+          response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
+          // Alternative path
+          response?.generatedVideos?.[0]?.video?.uri ||
+          // Direct video path
+          response?.videos?.[0]?.uri ||
+          // Samples direct path
+          response?.generatedSamples?.[0]?.video?.uri ||
+          // Result path (some models)
+          statusResult.result?.videos?.[0]?.uri ||
+          statusResult.result?.generatedSamples?.[0]?.video?.uri;
         
         if (videoUri) {
           console.log("✅ Video ready:", videoUri);
@@ -259,6 +270,9 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             }),
           };
         }
+        
+        // Log the full response structure for debugging
+        console.log("⚠️ No video URI found. Full response structure:", JSON.stringify(statusResult, null, 2));
         
         // Check for error
         if (statusResult.error) {
@@ -287,15 +301,24 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
           };
         }
         
-        // Done but no video - unknown failure
+        // Done but no video - check for specific VEO failure reasons
+        const failureReason = 
+          statusResult.response?.error?.message ||
+          statusResult.error?.message ||
+          statusResult.metadata?.failureReason ||
+          "Video generation completed but no video was returned";
+        
+        // Check if there's a filtered reason in metadata
+        const filterReason = statusResult.response?.generateVideoResponse?.raiMediaFilteredReasons;
+        
         return {
           statusCode: 200,
           headers,
           body: JSON.stringify({
             status: "failed",
             done: true,
-            error: "Video generation completed but no video was returned",
-            rawResponse: statusResult.response,
+            error: filterReason ? `Content filtered: ${JSON.stringify(filterReason)}` : failureReason,
+            rawResponse: statusResult,
           }),
         };
       }
