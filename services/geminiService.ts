@@ -1822,7 +1822,8 @@ export const generatePostVideo = async (
   // Used ONLY when there is NO source image
   const tryTextToVideo = async (clientGetter: () => GoogleGenAI) => {
     const client = clientGetter();
-    const durationSeconds = duration === "5s" ? 5 : 8;
+    // VEO image-to-video supports [4, 6, 8] seconds, not 5
+    const durationSeconds = duration === "5s" ? 6 : 8;
     
     console.log("📝 TEXT-TO-VIDEO mode (no source image)...");
     console.log("📝 Text prompt:", textToVideoPrompt.substring(0, 200) + "...");

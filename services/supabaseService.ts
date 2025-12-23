@@ -633,6 +633,10 @@ export const deleteBrand = async (brandId: string): Promise<boolean> => {
 /**
  * SQL to create the required tables.
  * Run this in the Supabase SQL editor if tables don't exist.
+ * 
+ * RLS MIGRATIONS:
+ * - See docs/database/001-enable-rls-permissive.sql (run now)
+ * - See docs/database/002-user-auth-rls-upgrade.sql (run when implementing auth)
  */
 export const DATABASE_SCHEMA = `
 -- Brands table: Stores analyzed brand profiles
@@ -643,6 +647,8 @@ CREATE TABLE IF NOT EXISTS brands (
   industry TEXT,
   profile_json JSONB NOT NULL,
   logo_url TEXT,
+  status TEXT DEFAULT 'active',
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, -- For future auth
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -671,14 +677,17 @@ CREATE TABLE IF NOT EXISTS saved_posts (
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_brands_url ON brands(url);
+CREATE INDEX IF NOT EXISTS idx_brands_user_id ON brands(user_id);
 CREATE INDEX IF NOT EXISTS idx_brand_assets_brand_id ON brand_assets(brand_id);
 CREATE INDEX IF NOT EXISTS idx_saved_posts_brand_id ON saved_posts(brand_id);
 CREATE INDEX IF NOT EXISTS idx_saved_posts_scheduled ON saved_posts(scheduled_date);
 
--- Row Level Security (Optional - enable if needed)
--- ALTER TABLE brands ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE brand_assets ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE saved_posts ENABLE ROW LEVEL SECURITY;
+-- Row Level Security (REQUIRED)
+-- Run migration 001 for permissive policies
+-- Run migration 002 when implementing user authentication
+ALTER TABLE brands ENABLE ROW LEVEL SECURITY;
+ALTER TABLE brand_assets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE saved_posts ENABLE ROW LEVEL SECURITY;
 `;
 
 /**

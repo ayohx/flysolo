@@ -70,3 +70,33 @@ next_actions:
   - "Add video playback UI component"
   - "Implement video caching/storage"
 
+# ============================================================================
+# ROADMAP / BACKLOG (Future Stories)
+# ============================================================================
+roadmap:
+  - id: "STORY-014"
+    title: "User Authentication System"
+    status: "backlog"
+    priority: "medium"
+    prerequisites:
+      - "App functioning with all bugs fixed"
+      - "RLS Migration 003 executed in Supabase"
+    description: |
+      Implement full user authentication for FlySolo:
+      - Login/Register page with email + password
+      - Supabase Auth integration  
+      - Session management (persist login state)
+      - Protected routes (redirect to login if not authenticated)
+      - User profile display in header
+      - Logout functionality
+      - Auto-assign user_id when creating new brands
+      
+      Database ready: docs/database/003-add-demo-user-and-upgrade.sql
+      Demo credentials: user@flysolo.ai / FlySolo!23
+    acceptance_criteria:
+      - User can register with email/password
+      - User can log in and stay logged in
+      - Each user only sees their own brands
+      - Logout clears session and redirects to login
+      - New brands are automatically linked to logged-in user
+

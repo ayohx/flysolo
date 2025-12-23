@@ -312,8 +312,8 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       };
     }
     
-    // Duration in seconds (VEO supports 5-8 seconds)
-    const durationSeconds = duration === "5s" ? 5 : 8;
+    // Duration in seconds (VEO image-to-video supports [4, 6, 8] seconds)
+    const durationSeconds = duration === "5s" ? 6 : 8;
     
     const location = "us-central1";
     
